@@ -1,0 +1,6 @@
+.site-publish/
+.publish-output/
+*.log
+.env
+.env.*
+!.env.example
