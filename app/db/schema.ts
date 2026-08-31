@@ -8,6 +8,8 @@ import {
 } from 'drizzle-orm/sqlite-core';
 export const customers = sqliteTable('customers', {
   id: text('id').primaryKey(),
+  customer_type: text('customer_type').notNull().default('unspecified'),
+  is_demo: integer('is_demo').notNull().default(0),
   name: text('name').notNull(),
   contact: text('contact').notNull().default(''),
   phone: text('phone').notNull().default(''),
@@ -17,6 +19,8 @@ export const customers = sqliteTable('customers', {
 });
 export const beans = sqliteTable('beans', {
   id: text('id').primaryKey(),
+  image_key: text('image_key').notNull().default(''),
+  is_demo: integer('is_demo').notNull().default(0),
   name: text('name').notNull(),
   origin: text('origin').notNull().default(''),
   process: text('process').notNull().default(''),
@@ -29,6 +33,7 @@ export const profiles = sqliteTable(
   'profiles',
   {
     id: text('id').primaryKey(),
+    is_demo: integer('is_demo').notNull().default(0),
     bean_id: text('bean_id')
       .notNull()
       .references(() => beans.id),
@@ -51,6 +56,7 @@ export const orders = sqliteTable(
   'orders',
   {
     id: text('id').primaryKey(),
+    is_demo: integer('is_demo').notNull().default(0),
     code: text('code').notNull().unique(),
     customer_id: text('customer_id')
       .notNull()
@@ -77,6 +83,7 @@ export const orders = sqliteTable(
   (t) => [
     index('idx_orders_status_created').on(t.status, t.created_at),
     index('idx_orders_created').on(t.created_at),
+    index('idx_orders_customer').on(t.customer_id),
     check(
       'order_status_valid',
       sql`${t.status} IN ('waiting','roasting','completed')`,

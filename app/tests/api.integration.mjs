@@ -36,6 +36,7 @@ try {
       kind: 'customer',
       name: '测试专用客户-' + records.order,
       contact: '流程验证',
+      customer_type: 'business',
       notes: '自动检查使用，不是真实客户',
     },
     201,
@@ -134,6 +135,69 @@ try {
     { kind: 'status', id: order.id, status: 'roasting' },
     409,
   );
+  const beforeDemo = await get({ kind: 'catalog', source: 'real' });
+  assert.equal(
+    beforeDemo.customers.find((c) => c.id === customer.id).customer_type,
+    'business',
+  );
+  await call('PATCH', {
+    kind: 'customer',
+    id: customer.id,
+    name: '测试个人客户-' + records.order,
+    customer_type: 'individual',
+  });
+  assert.equal(
+    (await get({ kind: 'catalog', source: 'real' })).customers.find(
+      (c) => c.id === customer.id,
+    ).customer_type,
+    'individual',
+  );
+  const realBeforeSeed = await get({ kind: 'catalog', source: 'real' });
+  await call('POST', { kind: 'demo' });
+  const seeded = await get({ kind: 'catalog' });
+  assert.deepEqual(seeded.demo_counts, {
+    customers: 16,
+    beans: 3,
+    profiles: 6,
+    orders: 24,
+  });
+  assert.deepEqual(
+    await get({ kind: 'catalog', source: 'real' }),
+    realBeforeSeed,
+  );
+  const demoCustomer = seeded.customers.find(
+    (c) => c.id === 'demo-v1-customer-person-1',
+  );
+  try {
+    await call('PATCH', {
+      ...demoCustomer,
+      kind: 'customer',
+      notes: '验证重复导入不会覆盖编辑',
+    });
+    assert.equal((await call('POST', { kind: 'demo' })).addedRows, 0);
+    const after = await get({ kind: 'catalog' });
+    assert.equal(
+      after.customers.find((c) => c.id === demoCustomer.id).notes,
+      '验证重复导入不会覆盖编辑',
+    );
+    assert.equal(
+      after.customers
+        .filter((c) => c.is_demo)
+        .reduce((sum, c) => sum + c.order_count, 0),
+      24,
+    );
+    assert.ok(
+      (await get({ kind: 'orders', source: 'real' })).orders.every(
+        (o) => o.is_demo === 0,
+      ),
+    );
+    assert.equal(
+      (await get({ kind: 'orders', customer_id: demoCustomer.id })).total,
+      2,
+    );
+  } finally {
+    await call('PATCH', { ...demoCustomer, kind: 'customer' });
+  }
   const cross = await fetch(endpoint, {
     method: 'POST',
     headers: {

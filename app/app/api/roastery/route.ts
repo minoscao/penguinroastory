@@ -1,4 +1,5 @@
 import { getD1 } from '@/db';
+import { seedDemo } from '@/db/seed-demo';
 import {
   InputError,
   object,
@@ -63,21 +64,43 @@ export async function GET(request: Request) {
     const db = await getD1();
     const p = new URL(request.url).searchParams;
     const kind = p.get('kind') || 'catalog';
+    const source = p.get('source') || 'all';
+    if (!['all', 'real'].includes(source))
+      throw new InputError('记录筛选无效。');
+    const realOnly = source === 'real';
     if (kind === 'catalog') {
-      const [customers, beans, profiles, stats] = await db.batch<
+      const [customers, beans, profiles, stats, demo] = await db.batch<
         Record<string, unknown>
       >([
-        db.prepare('SELECT * FROM customers ORDER BY created_at DESC'),
-        db.prepare('SELECT * FROM beans ORDER BY created_at DESC'),
-        db.prepare('SELECT * FROM profiles ORDER BY updated_at DESC'),
         db.prepare(
-          'SELECT status,COUNT(*) AS count FROM orders GROUP BY status',
+          "SELECT c.*,COUNT(o.id) AS order_count,COALESCE(SUM(CASE WHEN o.status IN ('waiting','roasting') THEN 1 ELSE 0 END),0) AS active_orders,COALESCE(SUM(o.quantity_grams),0) AS total_grams,MAX(o.created_at) AS last_order_at FROM customers c LEFT JOIN orders o ON o.customer_id=c.id" +
+            (realOnly ? ' AND o.is_demo=0 WHERE c.is_demo=0' : '') +
+            ' GROUP BY c.id ORDER BY c.created_at DESC',
+        ),
+        db.prepare(
+          'SELECT * FROM beans' +
+            (realOnly ? ' WHERE is_demo=0' : '') +
+            ' ORDER BY created_at DESC',
+        ),
+        db.prepare(
+          'SELECT * FROM profiles' +
+            (realOnly ? ' WHERE is_demo=0' : '') +
+            ' ORDER BY updated_at DESC',
+        ),
+        db.prepare(
+          'SELECT status,COUNT(*) AS count FROM orders' +
+            (realOnly ? ' WHERE is_demo=0' : '') +
+            ' GROUP BY status',
+        ),
+        db.prepare(
+          'SELECT (SELECT COUNT(*) FROM customers WHERE is_demo=1) AS customers,(SELECT COUNT(*) FROM beans WHERE is_demo=1) AS beans,(SELECT COUNT(*) FROM profiles WHERE is_demo=1) AS profiles,(SELECT COUNT(*) FROM orders WHERE is_demo=1) AS orders',
         ),
       ]);
       return json({
         customers: customers.results,
         beans: beans.results,
         profiles: profiles.results.map(decodeProfile),
+        demo_counts: demo.results[0],
         stats: Object.assign(
           { waiting: 0, roasting: 0, completed: 0 },
           Object.fromEntries(stats.results.map((r) => [r.status, r.count])),
@@ -107,6 +130,12 @@ export async function GET(request: Request) {
     const page = number(p.get('page') || 1, '页码', 1, 100000, true);
     const conditions: string[] = [];
     const bindings: (string | number)[] = [];
+    if (realOnly) conditions.push('is_demo=0');
+    const customerId = text(p.get('customer_id'), '客户', 80);
+    if (customerId) {
+      conditions.push('customer_id=?');
+      bindings.push(customerId);
+    }
     if (status !== 'all') {
       conditions.push('status=?');
       bindings.push(status);
@@ -151,13 +180,23 @@ export async function POST(request: Request) {
     const db = await getD1();
     const now = new Date().toISOString();
     const id = crypto.randomUUID();
+    if (b.kind === 'demo') return json(await seedDemo(db));
     if (b.kind === 'customer') {
       const x = customerInput(b);
       await db
         .prepare(
-          'INSERT INTO customers(id,name,contact,phone,notes,created_at,updated_at) VALUES(?,?,?,?,?,?,?)',
+          'INSERT INTO customers(id,name,customer_type,contact,phone,notes,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)',
         )
-        .bind(id, x.name, x.contact, x.phone, x.notes, now, now)
+        .bind(
+          id,
+          x.name,
+          x.customer_type,
+          x.contact,
+          x.phone,
+          x.notes,
+          now,
+          now,
+        )
         .run();
       return json({ id }, 201);
     }
@@ -165,24 +204,32 @@ export async function POST(request: Request) {
       const x = beanInput(b);
       await db
         .prepare(
-          'INSERT INTO beans(id,name,origin,process,variety,notes,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)',
+          'INSERT INTO beans(id,name,origin,process,variety,notes,image_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)',
         )
-        .bind(id, x.name, x.origin, x.process, x.variety, x.notes, now, now)
+        .bind(
+          id,
+          x.name,
+          x.origin,
+          x.process,
+          x.variety,
+          x.notes,
+          x.image_key,
+          now,
+          now,
+        )
         .run();
       return json({ id }, 201);
     }
     if (b.kind === 'profile') {
       const x = profileInput(b);
-      if (
-        !(await db
-          .prepare('SELECT id FROM beans WHERE id=?')
-          .bind(x.bean_id)
-          .first())
-      )
-        throw new InputError('请先保存这款豆子。');
+      const sourceBean = await db
+        .prepare('SELECT is_demo FROM beans WHERE id=?')
+        .bind(x.bean_id)
+        .first<{ is_demo: number }>();
+      if (!sourceBean) throw new InputError('请先保存这款豆子。');
       await db
         .prepare(
-          'INSERT INTO profiles(id,bean_id,name,roast_level,machine,batch_grams,points,notes,revision,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,1,?,?)',
+          'INSERT INTO profiles(id,bean_id,name,roast_level,machine,batch_grams,points,notes,revision,is_demo,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,1,?,?,?)',
         )
         .bind(
           id,
@@ -193,6 +240,7 @@ export async function POST(request: Request) {
           x.batch_grams,
           JSON.stringify(x.points),
           x.notes,
+          sourceBean?.is_demo ?? 0,
           now,
           now,
         )
@@ -237,6 +285,7 @@ export async function POST(request: Request) {
     if (!customer || !bean || !profileRow)
       throw new InputError('客户、豆子或烘焙方案已变化，请重新选择。');
     const profile = decodeProfile(profileRow) as Profile;
+    const isDemo = customer.is_demo || bean.is_demo || profile.is_demo ? 1 : 0;
     const code =
       'PR-' +
       now.slice(0, 10).replaceAll('-', '') +
@@ -245,7 +294,7 @@ export async function POST(request: Request) {
     const inserted = await db.batch<Record<string, unknown>>([
       db
         .prepare(
-          "INSERT OR IGNORE INTO orders(id,code,customer_id,bean_id,profile_id,customer_name,bean_name,profile_snapshot,quantity_grams,due_date,notes,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,'waiting',?,?)",
+          "INSERT OR IGNORE INTO orders(id,code,customer_id,bean_id,profile_id,customer_name,bean_name,profile_snapshot,quantity_grams,due_date,notes,status,is_demo,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,'waiting',?,?,?)",
         )
         .bind(
           x.id,
@@ -259,6 +308,7 @@ export async function POST(request: Request) {
           x.quantity_grams,
           x.due_date,
           x.notes,
+          isDemo,
           now,
           now,
         ),
@@ -285,9 +335,9 @@ export async function PATCH(request: Request) {
       const x = customerInput(b);
       const r = await db
         .prepare(
-          'UPDATE customers SET name=?,contact=?,phone=?,notes=?,updated_at=? WHERE id=?',
+          'UPDATE customers SET name=?,customer_type=?,contact=?,phone=?,notes=?,updated_at=? WHERE id=?',
         )
-        .bind(x.name, x.contact, x.phone, x.notes, now, id)
+        .bind(x.name, x.customer_type, x.contact, x.phone, x.notes, now, id)
         .run();
       if (!r.meta.changes) throw new InputError('客户不存在。', 404);
       return json({ id });
@@ -296,9 +346,18 @@ export async function PATCH(request: Request) {
       const x = beanInput(b);
       const r = await db
         .prepare(
-          'UPDATE beans SET name=?,origin=?,process=?,variety=?,notes=?,updated_at=? WHERE id=?',
+          'UPDATE beans SET name=?,origin=?,process=?,variety=?,notes=?,image_key=?,updated_at=? WHERE id=?',
         )
-        .bind(x.name, x.origin, x.process, x.variety, x.notes, now, id)
+        .bind(
+          x.name,
+          x.origin,
+          x.process,
+          x.variety,
+          x.notes,
+          x.image_key,
+          now,
+          id,
+        )
         .run();
       if (!r.meta.changes) throw new InputError('豆子不存在。', 404);
       return json({ id });

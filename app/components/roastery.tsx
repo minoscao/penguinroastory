@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import {
   Coffee,
   ClipboardList,
@@ -26,6 +27,13 @@ import {
   ChevronLeft,
   ChevronRight,
   RefreshCw,
+  UserRound,
+  Store,
+  Phone,
+  Heart,
+  MapPin,
+  Sparkles,
+  PackageCheck,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -148,13 +156,65 @@ function stamp(s: string | null) {
     : '—';
 }
 function StatusTag({ status }: { status: Status }) {
+  const Icon =
+    status === 'waiting' ? Clock3 : status === 'roasting' ? Flame : CheckCheck;
   return (
     <span className={'status-tag ' + status}>
-      <span />
+      <Icon size={14} />
       {statusLabels[status]}
     </span>
   );
 }
+const coffeeImages: Record<string, { src: string; label: string }> = {
+  floral: { src: '/images/coffee-floral.png', label: '花香与柑橘风味示意图' },
+  fruity: { src: '/images/coffee-fruity.png', label: '果甜与焦糖风味示意图' },
+  cocoa: { src: '/images/coffee-cocoa.png', label: '坚果与可可风味示意图' },
+};
+function CoffeePicture({
+  imageKey,
+  small = false,
+}: {
+  imageKey?: string;
+  small?: boolean;
+}) {
+  const picture = coffeeImages[imageKey || ''];
+  return picture ? (
+    <Image
+      unoptimized
+      src={picture.src}
+      alt={small ? '' : picture.label}
+      width={1536}
+      height={1024}
+      loading="lazy"
+      className={small ? 'coffee-thumbnail' : 'coffee-photo'}
+    />
+  ) : (
+    <span
+      className={
+        small
+          ? 'coffee-thumbnail photo-placeholder'
+          : 'coffee-photo photo-placeholder'
+      }
+    >
+      <BeanIcon size={small ? 25 : 54} strokeWidth={1.4} />
+    </span>
+  );
+}
+function DemoBadge() {
+  return <span className="demo-badge">模拟</span>;
+}
+function CustomerIcon({ type, size = 18 }: { type?: string; size?: number }) {
+  return type === 'business' ? (
+    <Store size={size} />
+  ) : (
+    <UserRound size={size} />
+  );
+}
+const customerTypes = {
+  individual: '个人客户',
+  business: '企业客户',
+  unspecified: '类型待确认',
+};
 function Field({
   label,
   children,
@@ -278,6 +338,8 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
     [toast, setToast] = useState('');
   const lock = useRef(false);
   const [filter, setFilter] = useState('all'),
+    [source, setSource] = useState('all'),
+    [customerType, setCustomerType] = useState('all'),
     [q, setQ] = useState(''),
     [search, setSearch] = useState(''),
     [page, setPage] = useState(1);
@@ -301,13 +363,15 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
     queueMicrotask(() => {
       if (!controller.signal.aborted) setCatalogError('');
     });
-    request<Catalog>(api + '?kind=catalog', { signal: controller.signal })
+    request<Catalog>(api + '?kind=catalog&source=' + source, {
+      signal: controller.signal,
+    })
       .then(setCatalog)
       .catch((e) => {
         if (!controller.signal.aborted) setCatalogError(message(e));
       });
     return () => controller.abort();
-  }, [revision]);
+  }, [revision, source]);
   useEffect(() => {
     if (!isOrders) return;
     const controller = new AbortController();
@@ -322,6 +386,7 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
         '?' +
         new URLSearchParams({
           kind: 'orders',
+          source,
           status,
           q: search,
           page: String(page),
@@ -339,7 +404,7 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
         }
       });
     return () => controller.abort();
-  }, [isOrders, status, search, page, revision]);
+  }, [isOrders, status, search, page, revision, source]);
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(''), 6000);
@@ -377,6 +442,14 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
   }
   const count = catalog?.stats;
   const details = views[view];
+  const visibleCustomers =
+    catalog?.customers.filter(
+      (c) =>
+        (customerType === 'all' || c.customer_type === customerType) &&
+        (c.name + c.contact + c.phone + c.notes)
+          .toLowerCase()
+          .includes(q.toLowerCase()),
+    ) || [];
   return (
     <div className="workspace">
       <aside className="sidebar">
@@ -451,6 +524,36 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                 : '新建订单'}
           </Button>
         </header>
+        {!!catalog?.demo_counts?.customers && (
+          <div className="demo-banner">
+            <span className="demo-banner-icon">
+              <Sparkles size={21} />
+            </span>
+            <div>
+              <strong>
+                {source === 'all'
+                  ? '模拟资料已准备好，可以放心试一试'
+                  : '现在只显示真实资料'}
+              </strong>
+              <p>
+                {catalog.demo_counts.customers} 位模拟客户 ·{' '}
+                {catalog.demo_counts.beans} 款豆子 ·{' '}
+                {catalog.demo_counts.orders}{' '}
+                张订单。模拟记录有单独标记，不会覆盖真实资料。
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setSource(source === 'all' ? 'real' : 'all');
+                setPage(1);
+              }}
+            >
+              {source === 'all' ? '只看真实资料' : '显示模拟资料'}
+            </Button>
+          </div>
+        )}
         {catalogError && (
           <div role="alert" className="error-banner">
             {catalogError}
@@ -477,7 +580,12 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
               ] as const
             ).map((s) => (
               <button
-                className={'stat ' + (filter === s.status ? 'selected' : '')}
+                className={
+                  'stat stat-' +
+                  s.status +
+                  ' ' +
+                  (filter === s.status ? 'selected' : '')
+                }
                 onClick={() => {
                   setFilter(s.status);
                   setPage(1);
@@ -485,7 +593,9 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                 key={s.status}
               >
                 <span>
-                  <s.icon size={17} />
+                  <span className="stat-icon">
+                    <s.icon size={23} />
+                  </span>
                   {statusLabels[s.status]}
                 </span>
                 <strong>
@@ -600,14 +710,38 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                           >
                             {o.code}
                           </button>
-                          <span className="cell-sub">{o.customer_name}</span>
+                          {!!o.is_demo && <DemoBadge />}
+                          <span className="cell-sub customer-cell">
+                            <CustomerIcon
+                              type={
+                                catalog?.customers.find(
+                                  (c) => c.id === o.customer_id,
+                                )?.customer_type
+                              }
+                              size={14}
+                            />
+                            {o.customer_name}
+                          </span>
                         </TableCell>
                         <TableCell>
-                          <strong className="cell-title">{o.bean_name}</strong>
-                          <span className="cell-sub">
-                            {o.profile_snapshot.name} ·{' '}
-                            {o.profile_snapshot.roast_level}
-                          </span>
+                          <div className="order-coffee">
+                            <CoffeePicture
+                              small
+                              imageKey={
+                                catalog?.beans.find((b) => b.id === o.bean_id)
+                                  ?.image_key
+                              }
+                            />
+                            <div>
+                              <strong className="cell-title">
+                                {o.bean_name}
+                              </strong>
+                              <span className="cell-sub">
+                                {o.profile_snapshot.name} ·{' '}
+                                {o.profile_snapshot.roast_level}
+                              </span>
+                            </div>
+                          </div>
                         </TableCell>
                         <TableCell className="quantity">
                           {weight(o.quantity_grams)}
@@ -734,15 +868,16 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                       .toLowerCase()
                       .includes(q.toLowerCase()),
                   )
-                  .map((b, i) => (
+                  .map((b) => (
                     <article className="bean-card" key={b.id}>
-                      <div className={'bean-card-top tone-' + (i % 3)}>
-                        <span className="bean-symbol">
-                          <BeanIcon size={30} strokeWidth={1.2} />
-                        </span>
-                        <span className="bean-origin">
-                          {b.origin || '产地待补充'}
-                        </span>
+                      <div className="bean-visual">
+                        <CoffeePicture imageKey={b.image_key} />
+                        <div className="bean-picture-label">
+                          {coffeeImages[b.image_key]
+                            ? '风味示意图 · 非实物照片'
+                            : '豆子档案'}
+                        </div>
+                        {!!b.is_demo && <DemoBadge />}
                         <Button
                           variant="ghost"
                           size="icon-sm"
@@ -753,6 +888,10 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                         </Button>
                       </div>
                       <div className="bean-card-body">
+                        <p className="origin-line">
+                          <MapPin size={14} />
+                          {b.origin || '产地待补充'}
+                        </p>
                         <h2>{b.name}</h2>
                         <div className="chips">
                           <span>{b.process || '处理法待补充'}</span>
@@ -763,6 +902,7 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                         </p>
                         <div className="card-bottom">
                           <span>
+                            <SlidersHorizontal size={15} />
                             {
                               catalog.profiles.filter((p) => p.bean_id === b.id)
                                 .length
@@ -801,78 +941,140 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                 )}
               </div>
             ) : (
-              <section className="panel">
-                {catalog.customers.filter((c) =>
-                  (c.name + c.contact + c.phone + c.notes)
-                    .toLowerCase()
-                    .includes(q.toLowerCase()),
-                ).length ? (
-                  <Table className="customers-table">
-                    <TableHeader>
-                      <TableRow>
-                        {[
-                          '客户名称',
-                          '联系人',
-                          '联系方式',
-                          '口味偏好与备注',
-                          '',
-                        ].map((t, i) => (
-                          <TableHead key={i}>{t}</TableHead>
-                        ))}
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {catalog.customers
-                        .filter((c) =>
-                          (c.name + c.contact + c.phone + c.notes)
-                            .toLowerCase()
-                            .includes(q.toLowerCase()),
-                        )
-                        .map((c) => (
-                          <TableRow key={c.id}>
-                            <TableCell>
-                              <span className="customer-name">
-                                <span className="avatar">
-                                  {c.name.slice(0, 1)}
-                                </span>
-                                <strong>{c.name}</strong>
-                              </span>
-                            </TableCell>
-                            <TableCell>{c.contact || '—'}</TableCell>
-                            <TableCell>{c.phone || '—'}</TableCell>
-                            <TableCell className="wrap-notes">
-                              {c.notes || '还没有备注'}
-                            </TableCell>
-                            <TableCell>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() =>
-                                  open({ type: 'customer', record: c })
-                                }
-                              >
-                                <Pencil size={14} />
-                                编辑
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                    </TableBody>
-                  </Table>
-                ) : (
-                  <div className="empty-state">
-                    <Users size={38} />
-                    <h3>{q ? '没有找到这个客户' : '记下你的第一位客户'}</h3>
-                    <p>记录客户和口味偏好，新订单可以直接选择。</p>
-                    <Button
-                      className="primary-action"
-                      onClick={() => open({ type: 'customer' })}
+              <section aria-label="客户档案">
+                <div className="customer-filters">
+                  {[
+                    { type: 'all', label: '全部客户', icon: Users },
+                    { type: 'individual', label: '个人客户', icon: UserRound },
+                    { type: 'business', label: '企业客户', icon: Store },
+                    ...(catalog.customers.some(
+                      (c) => c.customer_type === 'unspecified',
+                    )
+                      ? [
+                          {
+                            type: 'unspecified',
+                            label: '类型待确认',
+                            icon: Users,
+                          },
+                        ]
+                      : []),
+                  ].map((item) => (
+                    <button
+                      key={item.type}
+                      className={
+                        'customer-filter ' +
+                        (customerType === item.type ? 'active' : '')
+                      }
+                      aria-pressed={customerType === item.type}
+                      onClick={() => setCustomerType(item.type)}
                     >
-                      <Plus />
-                      新增客户
-                    </Button>
-                  </div>
-                )}
+                      <item.icon size={22} />
+                      <span>{item.label}</span>
+                      <strong>
+                        {
+                          catalog.customers.filter(
+                            (c) =>
+                              item.type === 'all' ||
+                              c.customer_type === item.type,
+                          ).length
+                        }
+                      </strong>
+                    </button>
+                  ))}
+                </div>
+                <div className="customer-grid">
+                  {visibleCustomers.map((c, i) => (
+                    <article
+                      className={'customer-card customer-' + c.customer_type}
+                      key={c.id}
+                    >
+                      <div className="customer-card-head">
+                        <div
+                          className={'customer-avatar avatar-tone-' + (i % 4)}
+                        >
+                          <CustomerIcon type={c.customer_type} size={29} />
+                        </div>
+                        <div className="customer-card-heading">
+                          <span className="customer-kind">
+                            {customerTypes[c.customer_type] || '类型待确认'}
+                          </span>
+                          <h2>{c.name}</h2>
+                        </div>
+                        {!!c.is_demo && <DemoBadge />}
+                      </div>
+                      <div className="customer-contact">
+                        <span>
+                          <UserRound size={15} />
+                          {c.contact ||
+                            (c.customer_type === 'individual'
+                              ? c.name
+                              : '联系人待补充')}
+                        </span>
+                        <span>
+                          <Phone size={15} />
+                          {c.phone || '联系方式待补充'}
+                        </span>
+                      </div>
+                      <div className="customer-preference">
+                        <Heart size={16} />
+                        <p>{c.notes || '记下喜欢的风味，让下一杯更合心意。'}</p>
+                      </div>
+                      <div className="customer-numbers">
+                        <span>
+                          <strong>
+                            {c.order_count || 0}
+                            <small> 单</small>
+                          </strong>
+                          累计订单
+                        </span>
+                        <span>
+                          <strong>
+                            {c.active_orders || 0}
+                            <small> 单</small>
+                          </strong>
+                          待完成
+                        </span>
+                        <span>
+                          <strong>{weight(c.total_grams || 0)}</strong>累计订购
+                        </span>
+                      </div>
+                      <div className="customer-card-bottom">
+                        <span>
+                          <PackageCheck size={14} />
+                          {c.last_order_at
+                            ? '最近下单 ' + stamp(c.last_order_at)
+                            : '还没有下单记录'}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => open({ type: 'customer', record: c })}
+                        >
+                          <Pencil size={14} />
+                          编辑
+                        </Button>
+                      </div>
+                    </article>
+                  ))}
+                  {visibleCustomers.length === 0 && (
+                    <div className="panel empty-state full-width">
+                      <Users size={38} />
+                      <h3>
+                        {q || customerType !== 'all'
+                          ? '没有找到符合条件的客户'
+                          : '记下你的第一位客户'}
+                      </h3>
+                      <p>个人、咖啡馆和公司都可以记录在这里。</p>
+                      <Button
+                        className="primary-action"
+                        onClick={() => open({ type: 'customer' })}
+                      >
+                        <Plus />
+                        新增客户
+                      </Button>
+                    </div>
+                  )}
+                </div>
               </section>
             )}
           </>
@@ -1070,6 +1272,21 @@ function CatalogForm({
         </Field>
         {modal.type === 'customer' ? (
           <>
+            <Field label="客户类型 *" wide>
+              <NativeSelect
+                name="customer_type"
+                defaultValue={customer?.customer_type || 'individual'}
+                required
+              >
+                <option value="individual">
+                  个人客户 · 自己喝、与朋友分享
+                </option>
+                <option value="business">企业客户 · 咖啡馆、公司、门店</option>
+                {customer?.customer_type === 'unspecified' && (
+                  <option value="unspecified">尚未确认</option>
+                )}
+              </NativeSelect>
+            </Field>
             <Field label="联系人">
               <Input
                 name="contact"
@@ -1112,6 +1329,18 @@ function CatalogForm({
                 defaultValue={bean?.variety}
                 placeholder="例如：瑰夏、卡杜拉"
               />
+            </Field>
+            <Field label="风味配图" wide>
+              <NativeSelect
+                name="image_key"
+                defaultValue={bean?.image_key || ''}
+              >
+                <option value="">暂不选择</option>
+                <option value="floral">花香柑橘</option>
+                <option value="fruity">果甜焦糖</option>
+                <option value="cocoa">坚果可可</option>
+              </NativeSelect>
+              <small>配图只表达风味，不代表这款豆子的实物外观。</small>
             </Field>
           </>
         )}
@@ -1388,6 +1617,7 @@ function OrderForm({
   open: (m: Modal) => void;
 }) {
   const [beanId, setBeanId] = useState(''),
+    [customerId, setCustomerId] = useState(''),
     [profileId, setProfileId] = useState(''),
     [requestId] = useState(() => crypto.randomUUID());
   const profiles = catalog.profiles.filter((p) => p.bean_id === beanId);
@@ -1429,13 +1659,19 @@ function OrderForm({
     <form onSubmit={submit}>
       <fieldset disabled={busy} className="form-grid">
         <Field label="客户 *" wide>
-          <NativeSelect name="customer_id" required defaultValue="">
+          <NativeSelect
+            name="customer_id"
+            required
+            value={customerId}
+            onChange={(e) => setCustomerId(e.target.value)}
+          >
             <option value="" disabled>
               选择这张订单的客户
             </option>
             {catalog.customers.map((c) => (
               <option key={c.id} value={c.id}>
-                {c.name}
+                {c.name} · {customerTypes[c.customer_type]}
+                {c.is_demo ? '（模拟）' : ''}
               </option>
             ))}
           </NativeSelect>
@@ -1455,6 +1691,7 @@ function OrderForm({
             {catalog.beans.map((b) => (
               <option key={b.id} value={b.id}>
                 {b.name}
+                {b.is_demo ? '（模拟）' : ''}
               </option>
             ))}
           </NativeSelect>
@@ -1495,6 +1732,16 @@ function OrderForm({
             </Button>
             <small>保存后重新打开新建订单。</small>
           </div>
+        )}
+        {!!(
+          catalog.customers.find((c) => c.id === customerId)?.is_demo ||
+          catalog.beans.find((b) => b.id === beanId)?.is_demo ||
+          selected?.is_demo
+        ) && (
+          <p className="demo-form-note field-wide">
+            <Sparkles size={17} />
+            你选用了模拟资料，这张订单也会标为模拟。示例曲线仅供体验，请勿直接用于实际烘焙。
+          </p>
         )}
         {selected && (
           <div className="selected-profile field-wide">
@@ -1592,7 +1839,10 @@ function OrderDetail({
   return (
     <div className="order-detail">
       <div className="detail-title">
-        <span>{o.code}</span>
+        <span>
+          {o.code}
+          {!!o.is_demo && <DemoBadge />}
+        </span>
         <StatusTag status={o.status} />
       </div>
       <div className="detail-facts">

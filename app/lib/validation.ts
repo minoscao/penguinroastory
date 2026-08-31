@@ -70,7 +70,11 @@ export function date(value: unknown) {
 }
 export function customerInput(v: unknown) {
   const b = object(v);
+  const customer_type = text(b.customer_type ?? 'unspecified', '客户类型', 20);
+  if (!['individual', 'business', 'unspecified'].includes(customer_type))
+    throw new InputError('请选择个人客户或企业客户。');
   return {
+    customer_type,
     name: text(b.name, '客户名称', 100, true),
     contact: text(b.contact, '联系人', 100),
     phone: text(b.phone, '联系方式', 60),
@@ -79,7 +83,11 @@ export function customerInput(v: unknown) {
 }
 export function beanInput(v: unknown) {
   const b = object(v);
+  const image_key = text(b.image_key, '风味示意图', 20);
+  if (!['', 'floral', 'fruity', 'cocoa'].includes(image_key))
+    throw new InputError('请选择提供的风味示意图。');
   return {
+    image_key,
     name: text(b.name, '豆子名称', 100, true),
     origin: text(b.origin, '产地', 100),
     process: text(b.process, '处理法', 100),

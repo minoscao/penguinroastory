@@ -1,6 +1,12 @@
 export type Status = 'waiting' | 'roasting' | 'completed';
 export type Customer = {
   id: string;
+  customer_type: 'individual' | 'business' | 'unspecified';
+  is_demo: number;
+  order_count?: number;
+  active_orders?: number;
+  total_grams?: number;
+  last_order_at?: string | null;
   name: string;
   contact: string;
   phone: string;
@@ -10,6 +16,8 @@ export type Customer = {
 };
 export type Bean = {
   id: string;
+  image_key: string;
+  is_demo: number;
   name: string;
   origin: string;
   process: string;
@@ -27,6 +35,7 @@ export type Point = {
 };
 export type Profile = {
   id: string;
+  is_demo: number;
   bean_id: string;
   name: string;
   roast_level: string;
@@ -40,6 +49,7 @@ export type Profile = {
 };
 export type RoastOrder = {
   id: string;
+  is_demo: number;
   code: string;
   customer_id: string;
   bean_id: string;
@@ -67,6 +77,12 @@ export type Catalog = {
   beans: Bean[];
   profiles: Profile[];
   stats: Record<Status, number>;
+  demo_counts?: {
+    customers: number;
+    beans: number;
+    profiles: number;
+    orders: number;
+  };
 };
 export const statusLabels: Record<Status, string> = {
   waiting: '等待烘焙',
