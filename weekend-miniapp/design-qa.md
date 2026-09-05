@@ -14,6 +14,13 @@
 - Verified phone screen CSS size: 393 × 852 at device scale factor 1
 - State: customer discovery home, iPhone frame, dark theme, featured hand-pour event, venue card, sticky registration action
 
+**Coworking guide update**
+- Private source visual: `D:/Program Files (x86)/xwechat_files/wxid_x1nvl8kyoo2f22_3430/temp/RWTemp/2026-09/0e4cc23a208d5ee57181b50caabc388e/76bc138123d0cb2dcbae856155394a8a.jpg`
+- Rendered screen: `reference/implementation-coworking-guide.png`
+- Normalized screen: `reference/implementation-coworking-guide-normalized.png`, 393 × 852
+- Side-by-side private comparison: `C:/Users/睿腾/.codex/visualizations/2026/09/05/01a07028-93e5-7c92-b2d5-581dd2109709/coworking-private-comparison.png`
+- The private source and comparison are intentionally excluded from Git because the supplied artwork contains a Wi-Fi password and a door-access QR code.
+
 **Full-view comparison evidence**
 - The implementation preserves the selected direction's warm espresso palette, framed editorial hero, serif Chinese display type, coral action color, compact date cards, image-led event rows, and fixed lower navigation.
 - The user-requested coworking-space photograph is intentionally added between the date strip and upcoming-events section. It introduces a light venue card while preserving the dark poster-wall hierarchy.
@@ -25,6 +32,7 @@
 - Venue card: the supplied 3214 × 1280 store image remains sharp at its 96 × 70 crop and opens a full-width 230 px detail image.
 - Ticket: the electronic ticket uses a real `QRCodeCanvas` payload rather than a decorative pattern; status changes from “待签到” to “已签到”.
 - Staff states: browser-tested registration totals, scan success, attendee status, and publish-success feedback.
+- Coworking guide: the safe generated banner preserves the reference's penguin-at-a-laptop, orange-fish companion, and blue-gray atmosphere. Four information cards preserve the source grouping while replacing credentials and access codes with “到店向店员获取” guidance.
 
 **Findings**
 - No actionable P0, P1, or P2 issues remain.
@@ -36,6 +44,7 @@
 2. Earlier P2: the first ticket used a decorative block pattern. Fix: replaced it with a machine-generated high-error-correction QR canvas containing the ticket payload. Post-fix evidence: browser-tested “我的报名” screen.
 3. Earlier P2: the first home build omitted the source design's persistent coral registration action. Fix: added a fixed “立即报名 ¥128” action above navigation. Post-fix evidence: `reference/qa-comparison-home.png`.
 4. Earlier P2: the added venue card pushed the next-section heading completely below the fold. Fix: tightened hero, date-strip, and venue-card heights while retaining practical tap areas. Post-fix evidence: `reference/qa-comparison-home.png` shows “接下来的周末” above the sticky action.
+5. Security review before coworking-guide implementation: the supplied source visibly contained network credentials and a door-access QR code. Fix: created a text-free derived illustration and moved all actionable access information behind an in-person staff instruction. Post-fix evidence: the private side-by-side comparison path above and `reference/implementation-coworking-guide-normalized.png`.
 
 **Required fidelity surfaces**
 - Fonts and typography: serif Chinese titles and strong sans-serif utility text preserve the selected editorial hierarchy; small text remains concise and does not visibly collide.
@@ -46,6 +55,7 @@
 
 **Primary interactions tested**
 - Open supplied venue element and return.
+- Open the coworking guide, scroll through all four guidance cards, and confirm that no password or access QR is exposed.
 - Open featured event, view details, and start registration.
 - Change guest quantity, fill contact name, and run simulated WeChat payment.
 - Open the resulting electronic ticket and verify QR rendering.

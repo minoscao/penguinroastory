@@ -6,8 +6,10 @@ import {
   ChevronRightIcon,
   ClockIcon,
   DashboardIcon,
+  GlobeIcon,
   HomeIcon,
   IdCardIcon,
+  LockClosedIcon,
   MinusIcon,
   Pencil2Icon,
   PersonIcon,
@@ -190,7 +192,7 @@ function HomeScreen({ flow }: { flow: FlowControls }) {
           <button className="date-tile"><small>国庆</small><strong>03</strong><span>品鉴</span></button>
         </section>
         <button className="venue-banner" onClick={() => flow.push(venueScreen())}>
-          <img src="/event-assets/penguin-coworking-space.jpg" alt="明亮的企鹅咖啡事务所与共享办公空间" />
+          <img src="/event-assets/coworking-penguin-guide.png" alt="企鹅和小鱼一起使用电脑" />
           <span className="venue-banner-copy">
             <span className="eyebrow">OUR SPACE</span>
             <strong>活动就在企鹅咖啡事务所</strong>
@@ -232,6 +234,16 @@ function venueScreen(): FlowScreen {
           <span className="eyebrow dark">PENGUIN COFFEE OFFICE</span>
           <h1>企鹅咖啡事务所</h1>
           <p>白天喝咖啡、周末参加活动，晚上也可以安静办公。活动会在店里的开放吧台和共享桌区举行。</p>
+        </section>
+        <section className="coworking-guide">
+          <img src="/event-assets/coworking-penguin-guide.png" alt="企鹅和小鱼在共享办公空间使用电脑" />
+          <div className="guide-heading"><span className="eyebrow dark">COWORKING GUIDE</span><h2>小企鹅自助指南</h2></div>
+          <div className="guide-grid">
+            <div><GlobeIcon /><span><strong>免费网络</strong><small>到店后向店员领取当天网络</small></span></div>
+            <div><ClockIcon /><span><strong>自助时段</strong><small>周末 19:00 后 · 平日 17:00 后</small></span></div>
+            <div><PersonIcon /><span><strong>企鹅表情包</strong><small>微信搜索“我鹅的故事”</small></span></div>
+            <div><LockClosedIcon /><span><strong>自助门禁</strong><small>开门方式请提前向店员申请</small></span></div>
+          </div>
         </section>
         <section className="detail-card fact-list">
           <div><ClockIcon /><span><small>营业时间</small><strong>7:00–22:00</strong></span></div>

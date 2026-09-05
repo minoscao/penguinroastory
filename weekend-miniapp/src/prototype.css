@@ -74,6 +74,16 @@ button { -webkit-tap-highlight-color: transparent; }
 .venue-photo { width: 100%; height: 230px; object-fit: cover; }
 .venue-intro h1 { margin-top: 4px; color: var(--ink); font-family: "Noto Serif SC", "Songti SC", serif; font-size: 25px; }
 .venue-intro p { margin-top: 9px; color: #796a60; font-size: 13px; }
+.coworking-guide { margin: 12px 15px; overflow: hidden; border-radius: 12px; background: #dbe4e7; box-shadow: 0 4px 18px rgba(72,48,35,.07); }
+.coworking-guide > img { display: block; width: 100%; height: 148px; object-fit: cover; }
+.guide-heading { padding: 16px 16px 10px; }
+.guide-heading h2 { margin-top: 3px; color: #21343a; font-family: "Noto Serif SC", "Songti SC", serif; font-size: 20px; }
+.guide-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 0 12px 14px; }
+.guide-grid > div { min-height: 82px; display: grid; grid-template-columns: 27px 1fr; gap: 7px; align-items: start; padding: 12px 9px; border-radius: 9px; background: rgba(255,255,255,.82); color: #21404a; }
+.guide-grid svg { width: 20px; height: 20px; margin-top: 1px; }
+.guide-grid span { display: grid; gap: 4px; }
+.guide-grid strong { color: #17343d; font-size: 11px; }
+.guide-grid small { color: #687b81; font-size: 9px; line-height: 1.45; }
 .venue-note { margin: 12px 15px; padding: 16px; border-radius: 10px; background: #e9ddcd; }
 .venue-note strong { color: #4c382c; font-size: 13px; }
 .venue-note p { margin-top: 5px; color: #796a60; font-size: 11px; }
