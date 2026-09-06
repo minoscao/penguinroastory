@@ -51,6 +51,7 @@ type RecordedPoint = {
   stage: string;
   seconds: number;
   temperature: number;
+  fan?: number;
 };
 
 type RoastProgress = {
@@ -426,6 +427,7 @@ function RoastConsole({
   const [now, setNow] = useState(() => Date.now());
   const [selectedStage, setSelectedStage] = useState('');
   const [chargeSetupOpen, setChargeSetupOpen] = useState(false);
+  const [stageRecordOpen, setStageRecordOpen] = useState(false);
   const [chargeTemperature, setChargeTemperature] = useState('');
   const [chargeWeight, setChargeWeight] = useState('');
   const [targetTemperature, setTargetTemperature] = useState(() => String(profile.points.at(-1)?.temperature || ''));
@@ -433,6 +435,9 @@ function RoastConsole({
   const [confirmedTarget, setConfirmedTarget] = useState<{ temperature: string; label: string; level: string } | null>(null);
   const [temperature, setTemperature] = useState('');
   const [typingStartedAt, setTypingStartedAt] = useState<number | null>(null);
+  const [stageTemperature, setStageTemperature] = useState('');
+  const [stageTypingStartedAt, setStageTypingStartedAt] = useState<number | null>(null);
+  const [stageFan, setStageFan] = useState<number | null>(null);
   const [records, setRecords] = useState<RecordedPoint[]>([]);
 
   useEffect(() => {
@@ -490,6 +495,31 @@ function RoastConsole({
     setTypingStartedAt(null);
   }
 
+  function openStageRecord(stage: string) {
+    setSelectedStage(stage);
+    if (!started || stage === '准备入豆') return;
+    setStageTemperature('');
+    setStageTypingStartedAt(null);
+    setStageFan(null);
+    setStageRecordOpen(true);
+  }
+
+  function recordStage() {
+    const value = Number(stageTemperature);
+    if (!Number.isFinite(value) || value < 0 || value > 350 || !stageFan) return;
+    const seconds = Math.max(
+      0,
+      startedAt === null
+        ? 0
+        : Math.floor(((stageTypingStartedAt || now) - startedAt) / 1000),
+    );
+    setRecords((current) => [
+      ...current,
+      { stage: selectedStage, seconds, temperature: value, fan: stageFan },
+    ]);
+    setStageRecordOpen(false);
+  }
+
   async function beginRecording() {
     const inputTemperature = Number(chargeTemperature);
     const inputWeight = Number(chargeWeight);
@@ -537,7 +567,7 @@ function RoastConsole({
             <Line type="linear" dataKey="actual" name="actual" stroke="#d2763c" strokeWidth={3} dot={{ r: 4, fill: '#fff', stroke: '#d2763c', strokeWidth: 2 }} activeDot={{ r: 6 }} isAnimationActive={false} connectNulls />
           </LineChart>
         </ChartContainer>
-        <p>{records.length ? `已记录 ${records.length} 个实际温度点，最近一点：${formatSeconds(records.at(-1)?.seconds || 0)} · ${records.at(-1)?.temperature} ℃` : '准备入豆后，填写温度与克重；开始录豆后会从 0:00 记录实际曲线。'}</p>
+        <p>{records.length ? `已记录 ${records.length} 个实际温度点，最近一点：${formatSeconds(records.at(-1)?.seconds || 0)} · ${records.at(-1)?.temperature} ℃${records.at(-1)?.fan ? ` · 风门 ${records.at(-1)?.fan}/10` : ''}` : '准备入豆后，填写温度与克重；开始录豆后会从 0:00 记录实际曲线。'}</p>
       </section>
 
       <section className="roast-controls">
@@ -546,8 +576,12 @@ function RoastConsole({
           <div>
             {stages.map((stage, index) => (
               <button key={stage} className={selectedStage === stage ? 'active' : ''} onClick={() => {
-                setSelectedStage(stage);
-                if (stage === '准备入豆' && !started) setChargeSetupOpen(true);
+                if (stage === '准备入豆' && !started) {
+                  setSelectedStage(stage);
+                  setChargeSetupOpen(true);
+                  return;
+                }
+                openStageRecord(stage);
               }}>
                 <small>{String(index + 1).padStart(2, '0')}</small>{stage}
               </button>
@@ -585,6 +619,22 @@ function RoastConsole({
             <label htmlFor="target-exit">目标出豆位置<NativeSelect id="target-exit" value={targetExit} onChange={(event) => setTargetExit(event.target.value)}>{roastTargets.map((target) => <option key={target.value} value={target.value}>{target.label} · {target.level}</option>)}</NativeSelect></label>
             <p className="roast-standard">默认参考：一爆初段为浅烘焙；一爆中段为中烘焙；一爆末段为中深烘焙；二爆中段为深烘焙；二爆末段为极深烘焙。</p>
             <Button className="begin-roast" type="submit" disabled={busy || !chargeTemperature || !chargeWeight || !targetTemperature}><Flame />开始录豆</Button>
+          </form>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={stageRecordOpen} onOpenChange={setStageRecordOpen}>
+        <DialogContent className="stage-record-dialog">
+          <DialogHeader>
+            <DialogTitle>{selectedStage}记录</DialogTitle>
+            <DialogDescription>填写此刻豆温，并直接点选风门档位。记录时间从输入温度的第一个数字开始计算。</DialogDescription>
+          </DialogHeader>
+          <form className="stage-record-form" onSubmit={(event) => { event.preventDefault(); recordStage(); }}>
+            <label htmlFor="stage-temperature">当前豆温（℃）<Input id="stage-temperature" value={stageTemperature} onChange={(event) => { if (!stageTypingStartedAt && event.target.value) setStageTypingStartedAt(now); setStageTemperature(event.target.value); }} inputMode="numeric" type="number" min="0" max="350" required placeholder="例如 185" /></label>
+            <fieldset className="fan-picker">
+              <legend>风门（1–10）</legend>
+              <div>{Array.from({ length: 10 }, (_, index) => index + 1).map((fan) => <button className={stageFan === fan ? 'active' : ''} type="button" key={fan} onClick={() => setStageFan(fan)}>{fan}</button>)}</div>
+            </fieldset>
+            <Button className="stage-save" type="submit" disabled={!stageTemperature || !stageFan}><Thermometer />记录阶段</Button>
           </form>
         </DialogContent>
       </Dialog>

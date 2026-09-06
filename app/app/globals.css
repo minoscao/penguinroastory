@@ -2325,6 +2325,17 @@ h1 { font-size: 35px; font-weight: 600; letter-spacing: -1.3px; }
 .charge-bean strong { color: #263d44; font-size: 15px; }
 .roast-standard { grid-column: 1 / -1; margin: 0; padding: 10px 12px; color: #76684f; background: #faf6ec; border: 1px solid #eee2ca; border-radius: 10px; font-size: 11px; line-height: 1.75; }
 .charge-form .begin-roast { grid-column: 1 / -1; }
+.stage-record-dialog { width: min(450px, calc(100vw - 32px)) !important; padding: 26px !important; border-radius: 18px !important; background: #ffffff; }
+.stage-record-form { display: grid; gap: 18px; }
+.stage-record-form > label { display: grid; gap: 7px; color: #52676d; font-size: 12px; font-weight: 700; }
+.stage-record-form > label input { height: 48px; color: #263d44; background: #f4f7f7; border-color: #d9e3e3; font-size: 18px; font-variant-numeric: tabular-nums; }
+.fan-picker { min-width: 0; padding: 0; margin: 0; border: 0; }
+.fan-picker legend { margin-bottom: 9px; color: #52676d; font-size: 12px; font-weight: 700; }
+.fan-picker > div { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.fan-picker button { min-height: 40px; color: #2e4248; background: #f2f6f6; border: 1px solid #d9e3e3; border-radius: 9px; font-size: 13px; font-weight: 700; }
+.fan-picker button:hover { border-color: #9daeb0; }
+.fan-picker button.active { color: #ffffff; background: #30454c; border-color: #30454c; }
+.stage-save { height: 46px; color: #ffffff; background: #d2763c !important; border-radius: 12px !important; }
 .temperature-screen { min-height: 110px; padding: 15px; background: #eef3f3; border-radius: 13px; }
 .temperature-screen > span { display: flex; align-items: center; gap: 6px; color: #60757a; font-size: 11px; }
 .temperature-screen strong { display: block; margin: 3px 0; color: #263d44; font-size: 40px; line-height: 1.12; letter-spacing: 1px; font-variant-numeric: tabular-nums; }
