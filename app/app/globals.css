@@ -2217,3 +2217,106 @@ h1 { font-size: 35px; font-weight: 600; letter-spacing: -1.3px; }
   .sidebar { width: auto; padding: 18px 18px 10px; }
   .main { margin-left: 0; }
 }
+
+.roast-console-dialog {
+  width: min(1040px, calc(100vw - 28px)) !important;
+  max-height: calc(100dvh - 28px);
+  overflow-y: auto;
+  padding: 28px !important;
+  border-radius: 20px !important;
+  background: #f7f9f9;
+}
+
+.roast-console { display: grid; gap: 20px; }
+.roast-console-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+.roast-console-title p {
+  margin: 0 0 5px;
+  color: #758589;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.8px;
+}
+.roast-console-title [data-slot='dialog-title'] { font-size: 25px; }
+.roast-clock {
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+  column-gap: 7px;
+  min-width: 140px;
+  padding: 12px 15px;
+  color: #263d44;
+  background: #e5eeee;
+  border: 1px solid #d4e0e0;
+  border-radius: 14px;
+}
+.roast-clock svg { grid-row: 1 / 3; }
+.roast-clock strong { font-size: 21px; line-height: 1; font-variant-numeric: tabular-nums; }
+.roast-clock span { color: #718084; font-size: 10px; }
+.live-curve {
+  padding: 18px 20px 13px;
+  background: #ffffff;
+  border: 1px solid #dbe3e3;
+  border-radius: 18px;
+}
+.live-curve-heading { display: flex; flex-wrap: wrap; gap: 18px; color: #51646a; font-size: 11px; }
+.curve-legend { display: inline-block; width: 18px; margin-right: 7px; vertical-align: middle; border-top: 2px solid; }
+.curve-legend.plan { border-color: #82979b; border-top-style: dashed; }
+.curve-legend.actual { border-color: #d2763c; border-top-width: 3px; }
+.live-curve-chart { width: 100%; height: 260px; margin: 8px 0 0; }
+.live-curve > p { margin: 4px 0 0; color: #77878a; font-size: 11px; }
+.roast-controls { display: grid; grid-template-columns: minmax(330px, 1.05fr) minmax(350px, 0.95fr); gap: 18px; }
+.stage-pad, .temperature-pad { padding: 19px; background: #ffffff; border: 1px solid #dbe3e3; border-radius: 18px; }
+.control-label { display: block; margin-bottom: 12px; color: #52676d; font-size: 12px; font-weight: 700; }
+.stage-pad > div { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.stage-pad button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 54px;
+  padding: 11px 13px;
+  color: #35484e;
+  text-align: left;
+  background: #f1f5f5;
+  border: 1px solid #dce5e5;
+  border-radius: 12px;
+  font-size: 13px;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.stage-pad button:hover { border-color: #9daeb0; }
+.stage-pad button.active { color: #ffffff; background: #30454c; border-color: #30454c; }
+.stage-pad button small { color: #849599; font-size: 10px; font-variant-numeric: tabular-nums; }
+.stage-pad button.active small { color: #c9d7d7; }
+.temperature-pad { display: grid; gap: 12px; }
+.temperature-screen { min-height: 110px; padding: 15px; background: #eef3f3; border-radius: 13px; }
+.temperature-screen > span { display: flex; align-items: center; gap: 6px; color: #60757a; font-size: 11px; }
+.temperature-screen strong { display: block; margin: 3px 0; color: #263d44; font-size: 40px; line-height: 1.12; letter-spacing: 1px; font-variant-numeric: tabular-nums; }
+.temperature-screen strong small { margin-left: 5px; color: #73858a; font-size: 16px; font-weight: 500; }
+.temperature-screen p { margin: 0; color: #7e8f92; font-size: 10px; }
+.number-pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.number-pad button {
+  min-height: 42px;
+  color: #2e4248;
+  background: #ffffff;
+  border: 1px solid #d9e3e3;
+  border-radius: 10px;
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+}
+.number-pad button:hover { background: #edf3f3; }
+.number-pad .erase { display: grid; place-items: center; }
+.number-pad .record { grid-column: span 2; color: #ffffff; background: #d2763c; border-color: #d2763c; font-size: 12px; font-weight: 700; }
+.number-pad .record:disabled { cursor: not-allowed; opacity: .45; }
+.roast-console-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; color: #6f8084; font-size: 11px; }
+
+@media (max-width: 760px) {
+  .roast-console-dialog { padding: 20px !important; }
+  .roast-console-title, .roast-console-footer { align-items: flex-start; flex-direction: column; }
+  .roast-controls { grid-template-columns: 1fr; }
+  .roast-clock { min-width: 0; }
+  .live-curve-chart { height: 210px; }
+}

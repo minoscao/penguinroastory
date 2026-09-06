@@ -8,12 +8,15 @@ import {
   Check,
   CheckCheck,
   ClipboardList,
+  Delete,
   Flame,
   History,
   PackageCheck,
   Plus,
   Scale,
   Send,
+  Thermometer,
+  TimerReset,
   Truck,
   Users,
   Warehouse,
@@ -29,6 +32,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { ChartContainer } from '@/components/ui/chart';
+import { CartesianGrid, Line, LineChart, Tooltip, XAxis, YAxis } from 'recharts';
 import type {
   BeanSku,
   Catalog,
@@ -36,6 +41,18 @@ import type {
   Shipment,
   StockMovement,
 } from '@/lib/model';
+
+type RoastBatch = {
+  key: string;
+  orders: RoastOrder[];
+  startedAt: number;
+};
+
+type RecordedPoint = {
+  stage: string;
+  seconds: number;
+  temperature: number;
+};
 
 type OperationsData = {
   active_orders: RoastOrder[];
@@ -98,6 +115,7 @@ export default function OperationsPanel({
   const [busy, setBusy] = useState(false);
   const [reload, setReload] = useState(0);
   const [roastMode, setRoastMode] = useState<'bean' | 'customer'>('bean');
+  const [roastBatch, setRoastBatch] = useState<RoastBatch | null>(null);
   const [shipmentOrder, setShipmentOrder] = useState<RoastOrder | 'sample' | null>(null);
   const [inventorySku, setInventorySku] = useState<BeanSku | null>(null);
 
@@ -138,6 +156,35 @@ export default function OperationsPanel({
     }
   }
 
+  async function startBatch(orders: RoastOrder[]) {
+    const startedAt = Date.now();
+    const ok = await mutate(
+      { kind: 'batch-status', id: orders[0].id, ids: orders.map((order) => order.id), status: 'roasting' },
+      `已开始 ${orders.length} 张合并订单`,
+    );
+    if (ok) {
+      setRoastBatch({
+        key: orders.map((order) => order.id).join('-'),
+        orders,
+        startedAt,
+      });
+    }
+  }
+
+  async function finishBatch() {
+    if (!roastBatch) return;
+    const ok = await mutate(
+      {
+        kind: 'batch-status',
+        id: roastBatch.orders[0].id,
+        ids: roastBatch.orders.map((order) => order.id),
+        status: 'completed',
+      },
+      `已完成 ${roastBatch.orders.length} 张合并订单的烘焙`,
+    );
+    if (ok) setRoastBatch(null);
+  }
+
   if (error && !data)
     return (
       <div className="panel operation-empty" role="alert">
@@ -161,6 +208,7 @@ export default function OperationsPanel({
           mode={roastMode}
           setMode={setRoastMode}
           busy={busy}
+          startBatch={startBatch}
           run={(ids, status, notice) =>
             mutate({ kind: 'batch-status', id: ids[0], ids, status }, notice)
           }
@@ -219,6 +267,18 @@ export default function OperationsPanel({
           )}
         </DialogContent>
       </Dialog>
+
+      <Dialog open={!!roastBatch} onOpenChange={(open) => !open && setRoastBatch(null)}>
+        <DialogContent className="roast-console-dialog">
+          {roastBatch && (
+            <RoastConsole
+              batch={roastBatch}
+              busy={busy}
+              finish={finishBatch}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
@@ -229,6 +289,7 @@ function RoastingBoard({
   mode,
   setMode,
   busy,
+  startBatch,
   run,
 }: {
   data: OperationsData;
@@ -236,6 +297,7 @@ function RoastingBoard({
   mode: 'bean' | 'customer';
   setMode: (mode: 'bean' | 'customer') => void;
   busy: boolean;
+  startBatch: (orders: RoastOrder[]) => Promise<void>;
   run: (ids: string[], status: 'roasting' | 'completed', notice: string) => void;
 }) {
   const groups = useMemo(() => {
@@ -271,7 +333,6 @@ function RoastingBoard({
               const first = orders[0];
               const sku = catalog.skus.find((item) => item.id === first.sku_id);
               const total = orders.reduce((sum, order) => sum + order.quantity_grams, 0);
-              const target = first.status === 'waiting' ? 'roasting' : 'completed';
               return (
                 <article className="roast-group" key={[first.status, first.sku_id, first.profile_id].join('-')}>
                   <div className={'group-icon ' + first.status}>{first.status === 'waiting' ? <Boxes /> : <Flame />}</div>
@@ -281,9 +342,9 @@ function RoastingBoard({
                     <div className="customer-chips">{orders.map((order) => <span key={order.id}>{order.customer_name} {kg(order.quantity_grams)}</span>)}</div>
                   </div>
                   <div className="group-total"><small>合并重量</small><strong>{kg(total)}</strong><span>计划 {orders.reduce((sum, order) => sum + order.batch_count, 0)} 仓</span></div>
-                  <Button className="primary-action" disabled={busy} onClick={() => run(orders.map((order) => order.id), target, target === 'roasting' ? `已开始 ${orders.length} 张合并订单` : `已完成 ${orders.length} 张合并订单的烘焙`)}>
-                    {target === 'roasting' ? <Flame /> : <Check />}
-                    {target === 'roasting' ? '开始这一批' : '完成这一批'}
+                  <Button className="primary-action" disabled={busy} onClick={() => first.status === 'waiting' ? startBatch(orders) : run(orders.map((order) => order.id), 'completed', `已完成 ${orders.length} 张合并订单的烘焙`)}>
+                    {first.status === 'waiting' ? <Flame /> : <Check />}
+                    {first.status === 'waiting' ? '开始这一批' : '完成这一批'}
                   </Button>
                 </article>
               );
@@ -296,7 +357,7 @@ function RoastingBoard({
                 <div><strong>{order.customer_name}</strong><span>{order.code}</span></div>
                 <div><strong>{order.bean_name}</strong><span>{skuName(catalog.skus.find((item) => item.id === order.sku_id), order)}</span></div>
                 <strong>{kg(order.quantity_grams)}</strong>
-                <Button variant="outline" disabled={busy} onClick={() => run([order.id], order.status === 'waiting' ? 'roasting' : 'completed', order.status === 'waiting' ? '订单已开始烘焙' : '订单烘焙已完成')}>
+                <Button variant="outline" disabled={busy} onClick={() => order.status === 'waiting' ? startBatch([order]) : run([order.id], 'completed', '订单烘焙已完成')}>
                   {order.status === 'waiting' ? '开始烘焙' : '完成烘焙'}<ArrowRight />
                 </Button>
               </article>
@@ -306,6 +367,143 @@ function RoastingBoard({
       </section>
     </>
   );
+}
+
+function RoastConsole({
+  batch,
+  busy,
+  finish,
+}: {
+  batch: RoastBatch;
+  busy: boolean;
+  finish: () => Promise<void>;
+}) {
+  const profile = batch.orders[0].profile_snapshot;
+  const [now, setNow] = useState(() => Date.now());
+  const [selectedStage, setSelectedStage] = useState('入豆');
+  const [temperature, setTemperature] = useState('');
+  const [typingStartedAt, setTypingStartedAt] = useState<number | null>(null);
+  const [records, setRecords] = useState<RecordedPoint[]>([]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 250);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const elapsed = Math.max(0, Math.floor((now - batch.startedAt) / 1000));
+  const recordAt = Math.max(
+    0,
+    Math.floor(((typingStartedAt || now) - batch.startedAt) / 1000),
+  );
+  const chartData = useMemo(() => {
+    const points = new Map<number, { seconds: number; plan?: number; actual?: number; stage?: string }>();
+    for (const point of profile.points) {
+      points.set(point.seconds, { ...points.get(point.seconds), seconds: point.seconds, plan: point.temperature });
+    }
+    for (const point of records) {
+      points.set(point.seconds, { ...points.get(point.seconds), seconds: point.seconds, actual: point.temperature, stage: point.stage });
+    }
+    return [...points.values()].sort((a, b) => a.seconds - b.seconds);
+  }, [profile.points, records]);
+  const chartEnd = Math.max(
+    profile.points.at(-1)?.seconds || 0,
+    records.at(-1)?.seconds || 0,
+    elapsed,
+    60,
+  );
+
+  function addDigit(digit: string) {
+    if (!typingStartedAt) setTypingStartedAt(now);
+    setTemperature((value) => (value.length >= 3 ? value : value + digit));
+  }
+
+  function erase() {
+    setTemperature((value) => {
+      const next = value.slice(0, -1);
+      if (!next) setTypingStartedAt(null);
+      return next;
+    });
+  }
+
+  function recordTemperature() {
+    const value = Number(temperature);
+    if (!Number.isFinite(value) || value < 0 || value > 350) return;
+    setRecords((current) => [
+      ...current,
+      { stage: selectedStage || '即时温度', seconds: recordAt, temperature: value },
+    ]);
+    setTemperature('');
+    setTypingStartedAt(null);
+  }
+
+  const stages = ['入豆', '回温', '转黄 / 开风门', '一爆', '二爆', '出豆'];
+  return (
+    <div className="roast-console">
+      <DialogHeader>
+        <div className="roast-console-title">
+          <div>
+            <p>LIVE ROAST CONSOLE</p>
+            <DialogTitle>{batch.orders[0].bean_name} · 本锅烘焙</DialogTitle>
+            <DialogDescription>
+              {profile.name} · {batch.orders.length} 张订单合并烘焙
+            </DialogDescription>
+          </div>
+          <div className="roast-clock"><TimerReset size={17} /><strong>{formatSeconds(elapsed)}</strong><span>本锅时间</span></div>
+        </div>
+      </DialogHeader>
+
+      <section className="live-curve" aria-label="计划与实际豆温曲线">
+        <div className="live-curve-heading">
+          <div><span className="curve-legend plan" />历史 / 方案曲线</div>
+          <div><span className="curve-legend actual" />本次实际曲线</div>
+        </div>
+        <ChartContainer config={{ plan: { label: '方案豆温', color: '#82979b' }, actual: { label: '本次豆温', color: '#d2763c' } }} className="live-curve-chart">
+          <LineChart data={chartData} margin={{ top: 16, right: 18, bottom: 4, left: -16 }}>
+            <CartesianGrid vertical={false} stroke="#e2e8e8" />
+            <XAxis dataKey="seconds" type="number" domain={[0, chartEnd]} tickFormatter={formatSeconds} tickLine={false} axisLine={false} minTickGap={32} />
+            <YAxis domain={[0, 230]} tickFormatter={(value) => value + '°'} tickLine={false} axisLine={false} width={38} />
+            <Tooltip labelFormatter={(value) => formatSeconds(Number(value))} formatter={(value, name) => [String(value) + ' ℃', name === 'plan' ? '方案豆温' : '本次豆温']} />
+            <Line type="linear" dataKey="plan" name="plan" stroke="#82979b" strokeWidth={2} strokeDasharray="5 5" dot={false} isAnimationActive={false} connectNulls />
+            <Line type="linear" dataKey="actual" name="actual" stroke="#d2763c" strokeWidth={3} dot={{ r: 4, fill: '#fff', stroke: '#d2763c', strokeWidth: 2 }} activeDot={{ r: 6 }} isAnimationActive={false} connectNulls />
+          </LineChart>
+        </ChartContainer>
+        <p>{records.length ? `已记录 ${records.length} 个实际温度点，最近一点：${formatSeconds(records.at(-1)?.seconds || 0)} · ${records.at(-1)?.temperature} ℃` : '先按一个阶段，再输入温度；实际曲线会从第一个记录点开始出现。'}</p>
+      </section>
+
+      <section className="roast-controls">
+        <div className="stage-pad" aria-label="烘焙阶段">
+          <span className="control-label">烘焙阶段</span>
+          <div>
+            {stages.map((stage, index) => (
+              <button key={stage} className={selectedStage === stage ? 'active' : ''} onClick={() => setSelectedStage(stage)}>
+                <small>{String(index + 1).padStart(2, '0')}</small>{stage}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="temperature-pad">
+          <div className="temperature-screen">
+            <span><Thermometer size={17} />正在记录：{selectedStage || '即时温度'}</span>
+            <strong>{temperature || '—'}<small>℃</small></strong>
+            <p>记录时间 {formatSeconds(recordAt)}（从输入第一个数字起算）</p>
+          </div>
+          <div className="number-pad" aria-label="输入豆温">
+            {['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'].map((digit) => <button key={digit} onClick={() => addDigit(digit)}>{digit}</button>)}
+            <button className="erase" aria-label="删除最后一个数字" onClick={erase}><Delete size={20} /></button>
+            <button className="record" disabled={!temperature} onClick={recordTemperature}>确认温度</button>
+          </div>
+        </div>
+      </section>
+      <div className="roast-console-footer">
+        <span>温度点会按输入第一个数字时的时间写入曲线。</span>
+        <Button className="primary-action" disabled={busy} onClick={finish}><CheckCheck />结束本锅并标记完成</Button>
+      </div>
+    </div>
+  );
+}
+
+function formatSeconds(seconds: number) {
+  return Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0');
 }
 
 function FulfillmentBoard({ data, busy, openShipment, delivered }: { data: OperationsData; busy: boolean; openShipment: (order: RoastOrder | 'sample') => void; delivered: (id: string) => void }) {
