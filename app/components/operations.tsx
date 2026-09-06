@@ -54,6 +54,14 @@ type RecordedPoint = {
   temperature: number;
 };
 
+const roastTargets = [
+  { value: 'first-start', label: '一爆初段出豆', level: '浅烘焙' },
+  { value: 'first-middle', label: '一爆中段出豆', level: '中烘焙' },
+  { value: 'first-end', label: '一爆末段出豆', level: '中深烘焙' },
+  { value: 'second-middle', label: '二爆中段出豆', level: '深烘焙' },
+  { value: 'second-end', label: '二爆末段出豆', level: '极深烘焙' },
+] as const;
+
 type OperationsData = {
   active_orders: RoastOrder[];
   completed_orders: RoastOrder[];
@@ -389,8 +397,12 @@ function RoastConsole({
   const profile = batch.orders[0].profile_snapshot;
   const [now, setNow] = useState(() => Date.now());
   const [selectedStage, setSelectedStage] = useState('');
+  const [chargeSetupOpen, setChargeSetupOpen] = useState(false);
   const [chargeTemperature, setChargeTemperature] = useState('');
   const [chargeWeight, setChargeWeight] = useState('');
+  const [targetTemperature, setTargetTemperature] = useState(() => String(profile.points.at(-1)?.temperature || ''));
+  const [targetExit, setTargetExit] = useState(() => defaultRoastTarget(profile.roast_level));
+  const [confirmedTarget, setConfirmedTarget] = useState<{ temperature: string; label: string; level: string } | null>(null);
   const [temperature, setTemperature] = useState('');
   const [typingStartedAt, setTypingStartedAt] = useState<number | null>(null);
   const [records, setRecords] = useState<RecordedPoint[]>([]);
@@ -460,6 +472,9 @@ function RoastConsole({
     setNow(startedAt);
     setRecords([{ stage: '入豆', seconds: 0, temperature: inputTemperature }]);
     setSelectedStage('回温');
+    const target = roastTargets.find((item) => item.value === targetExit) || roastTargets[1];
+    setConfirmedTarget({ temperature: targetTemperature, label: target.label, level: target.level });
+    setChargeSetupOpen(false);
   }
 
   const stages = ['准备入豆', '回温', '转黄 / 开风门', '一爆', '二爆', '出豆'];
@@ -473,6 +488,7 @@ function RoastConsole({
             <DialogDescription>
               {profile.name} · {batch.orders.length} 张订单合并烘焙
             </DialogDescription>
+            {confirmedTarget && <span className="confirmed-target">目标 {confirmedTarget.temperature} ℃ · {confirmedTarget.label} · {confirmedTarget.level}</span>}
           </div>
           <div className="roast-clock"><TimerReset size={17} /><strong>{started ? formatSeconds(elapsed) : '待开始'}</strong><span>{started ? '本锅时间' : '填写入豆资料后开始'}</span></div>
         </div>
@@ -501,23 +517,16 @@ function RoastConsole({
           <span className="control-label">烘焙阶段</span>
           <div>
             {stages.map((stage, index) => (
-              <button key={stage} className={selectedStage === stage ? 'active' : ''} onClick={() => setSelectedStage(stage)}>
+              <button key={stage} className={selectedStage === stage ? 'active' : ''} onClick={() => {
+                setSelectedStage(stage);
+                if (stage === '准备入豆' && !started) setChargeSetupOpen(true);
+              }}>
                 <small>{String(index + 1).padStart(2, '0')}</small>{stage}
               </button>
             ))}
           </div>
         </div>
         <div className="temperature-pad">
-          {selectedStage === '准备入豆' && !started ? (
-            <div className="charge-setup">
-              <strong>准备入豆</strong>
-              <p>确认入豆温度与本锅投豆克重后，再开始记录时间。</p>
-              <label htmlFor="charge-temperature">入豆温度（℃）<Input id="charge-temperature" value={chargeTemperature} onChange={(event) => setChargeTemperature(event.target.value)} inputMode="numeric" type="number" min="0" max="350" placeholder="例如 185" /></label>
-              <label htmlFor="charge-weight">入豆克重（g）<Input id="charge-weight" value={chargeWeight} onChange={(event) => setChargeWeight(event.target.value)} inputMode="numeric" type="number" min="1" max="100000" placeholder="例如 1000" /></label>
-              <Button className="begin-roast" disabled={busy || !chargeTemperature || !chargeWeight} onClick={beginRecording}><Flame />开始录豆</Button>
-            </div>
-          ) : (
-            <>
           <div className="temperature-screen">
             <span><Thermometer size={17} />正在记录：{selectedStage || '选择一个阶段或直接记录温度'}</span>
             <strong>{temperature || '—'}<small>℃</small></strong>
@@ -528,16 +537,38 @@ function RoastConsole({
             <button className="erase" disabled={!started} aria-label="删除最后一个数字" onClick={erase}><Delete size={20} /></button>
             <button className="record" disabled={!started || !temperature} onClick={recordTemperature}>记录温度</button>
           </div>
-            </>
-          )}
         </div>
       </section>
       <div className="roast-console-footer">
         <span>温度点会按输入第一个数字时的时间写入曲线。</span>
         <Button className="primary-action" disabled={busy || !started} onClick={finish}><CheckCheck />结束本锅并标记完成</Button>
       </div>
+      <Dialog open={chargeSetupOpen} onOpenChange={setChargeSetupOpen}>
+        <DialogContent className="charge-setup-dialog">
+          <DialogHeader>
+            <DialogTitle>准备入豆</DialogTitle>
+            <DialogDescription>确认这锅的起始资料和出豆目标后，点击“开始录豆”才会从 0:00 计时。</DialogDescription>
+          </DialogHeader>
+          <form className="charge-form" onSubmit={(event) => { event.preventDefault(); void beginRecording(); }}>
+            <div className="charge-bean">本锅豆子<strong>{batch.orders[0].bean_name}</strong></div>
+            <label htmlFor="charge-temperature">入豆温度（℃）<Input id="charge-temperature" value={chargeTemperature} onChange={(event) => setChargeTemperature(event.target.value)} inputMode="numeric" type="number" min="0" max="350" required placeholder="例如 185" /></label>
+            <label htmlFor="charge-weight">入豆克重（g）<Input id="charge-weight" value={chargeWeight} onChange={(event) => setChargeWeight(event.target.value)} inputMode="numeric" type="number" min="1" max="100000" required placeholder="例如 1000" /></label>
+            <label htmlFor="target-temperature">目标出豆温度（℃）<Input id="target-temperature" value={targetTemperature} onChange={(event) => setTargetTemperature(event.target.value)} inputMode="numeric" type="number" min="0" max="350" required placeholder="例如 190" /></label>
+            <label htmlFor="target-exit">目标出豆位置<NativeSelect id="target-exit" value={targetExit} onChange={(event) => setTargetExit(event.target.value)}>{roastTargets.map((target) => <option key={target.value} value={target.value}>{target.label} · {target.level}</option>)}</NativeSelect></label>
+            <p className="roast-standard">默认参考：一爆初段为浅烘焙；一爆中段为中烘焙；一爆末段为中深烘焙；二爆中段为深烘焙；二爆末段为极深烘焙。</p>
+            <Button className="begin-roast" type="submit" disabled={busy || !chargeTemperature || !chargeWeight || !targetTemperature}><Flame />开始录豆</Button>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
+}
+
+function defaultRoastTarget(roastLevel: string) {
+  if (roastLevel.includes('极深')) return 'second-end';
+  if (roastLevel.includes('深')) return roastLevel.includes('中深') ? 'first-end' : 'second-middle';
+  if (roastLevel.includes('中')) return 'first-middle';
+  return 'first-start';
 }
 
 function formatSeconds(seconds: number) {
