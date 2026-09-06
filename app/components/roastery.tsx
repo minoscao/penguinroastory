@@ -193,9 +193,18 @@ function StatusTag({ status }: { status: Status }) {
   );
 }
 const coffeeImages: Record<string, { src: string; label: string }> = {
-  floral: { src: '/images/coffee-floral.png', label: '花香与柑橘风味示意图' },
-  fruity: { src: '/images/coffee-fruity.png', label: '果甜与焦糖风味示意图' },
-  cocoa: { src: '/images/coffee-cocoa.png', label: '坚果与可可风味示意图' },
+  floral: {
+    src: '/images/bean-poster-mint.jpg',
+    label: '上传的薄荷色咖啡豆海报',
+  },
+  fruity: {
+    src: '/images/bean-poster-rose.jpg',
+    label: '上传的暖粉色咖啡豆海报',
+  },
+  cocoa: {
+    src: '/images/bean-poster-olive.jpg',
+    label: '上传的深橄榄色咖啡豆海报',
+  },
 };
 function CoffeePicture({
   imageKey,
@@ -204,27 +213,17 @@ function CoffeePicture({
   imageKey?: string;
   small?: boolean;
 }) {
-  const picture = coffeeImages[imageKey || ''];
-  return picture ? (
+  const picture = coffeeImages[imageKey || 'floral'] || coffeeImages.floral;
+  return (
     <Image
       unoptimized
       src={picture.src}
       alt={small ? '' : picture.label}
-      width={1536}
-      height={1024}
+      width={1254}
+      height={1254}
       loading="lazy"
       className={small ? 'coffee-thumbnail' : 'coffee-photo'}
     />
-  ) : (
-    <span
-      className={
-        small
-          ? 'coffee-thumbnail photo-placeholder'
-          : 'coffee-photo photo-placeholder'
-      }
-    >
-      <BeanIcon size={small ? 25 : 54} strokeWidth={1.4} />
-    </span>
   );
 }
 function DemoBadge() {
@@ -916,9 +915,7 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                       <div className="bean-visual">
                         <CoffeePicture imageKey={b.image_key} />
                         <div className="bean-picture-label">
-                          {coffeeImages[b.image_key]
-                            ? '风味示意图 · 非实物照片'
-                            : '豆子档案'}
+                          上传豆子海报
                         </div>
                         {!!b.is_demo && <DemoBadge />}
                         <Button
@@ -1449,17 +1446,16 @@ function CatalogForm({
                 placeholder="例如：瑰夏、卡杜拉"
               />
             </Field>
-            <Field label="风味配图" wide>
+            <Field label="豆子主图" wide>
               <NativeSelect
                 name="image_key"
-                defaultValue={bean?.image_key || ''}
+                defaultValue={bean?.image_key || 'floral'}
               >
-                <option value="">暂不选择</option>
-                <option value="floral">花香柑橘</option>
-                <option value="fruity">果甜焦糖</option>
-                <option value="cocoa">坚果可可</option>
+                <option value="floral">薄荷绿豆子海报</option>
+                <option value="fruity">暖粉色豆子海报</option>
+                <option value="cocoa">深橄榄豆子海报</option>
               </NativeSelect>
-              <small>配图只表达风味，不代表这款豆子的实物外观。</small>
+              <small>使用你上传的豆子海报作为档案封面。</small>
             </Field>
           </>
         )}
