@@ -5,6 +5,8 @@ import {
   beanInput,
   profileInput,
   orderInput,
+  inventoryInput,
+  shipmentInput,
   nextStatus,
   date,
 } from '../lib/validation.ts';
@@ -136,10 +138,31 @@ void test('订购重量必须为正整数克', () => {
         id: crypto.randomUUID(),
         customer_id: 'c',
         bean_id: 'b',
+        sku_id: 's',
         profile_id: 'p',
         quantity_grams: grams,
+        batch_count: 1,
       }),
     );
+});
+void test('库存变动和发货信息必须完整', () => {
+  assert.equal(
+    inventoryInput({ sku_id: 's', delta_grams: 1500 }).delta_grams,
+    1500,
+  );
+  assert.throws(() => inventoryInput({ sku_id: 's', delta_grams: Infinity }));
+  assert.equal(
+    shipmentInput({
+      customer_name: '测试客户',
+      carrier: '顺丰',
+      tracking_number: 'SF001',
+      is_sample: 1,
+    }).is_sample,
+    1,
+  );
+  assert.throws(() =>
+    shipmentInput({ customer_name: '测试客户', carrier: '顺丰' }),
+  );
 });
 void test('状态必须按等待、烘焙、完成的顺序推进', () => {
   assert.equal(nextStatus('waiting', 'roasting'), 'roasting');

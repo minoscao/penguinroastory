@@ -9,9 +9,15 @@ for db in (root/'.wrangler').rglob('*.sqlite'):
         if not exists: continue
         row=connection.execute('SELECT customer_id FROM orders WHERE id=?',(records['order'],)).fetchone()
         if row and row[0]!=records['customer']: raise RuntimeError('Test ownership mismatch; cleanup stopped')
+        if records.get('shipment'):
+            connection.execute('DELETE FROM shipments WHERE id=?',(records['shipment'],))
         connection.execute('DELETE FROM order_events WHERE order_id=?',(records['order'],))
         connection.execute('DELETE FROM orders WHERE id=?',(records['order'],))
+        if records.get('sku'):
+            connection.execute('DELETE FROM stock_movements WHERE sku_id=?',(records['sku'],))
         connection.execute('DELETE FROM profiles WHERE id=?',(records['profile'],))
+        if records.get('sku'):
+            connection.execute('DELETE FROM bean_skus WHERE id=?',(records['sku'],))
         connection.execute('DELETE FROM beans WHERE id=?',(records['bean'],))
         connection.execute('DELETE FROM customers WHERE id=?',(records['customer'],))
 print('Only exact integration-test records removed from local storage.')

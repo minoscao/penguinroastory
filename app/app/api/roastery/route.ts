@@ -7,8 +7,11 @@ import {
   number,
   customerInput,
   beanInput,
+  skuInput,
   profileInput,
   orderInput,
+  inventoryInput,
+  shipmentInput,
   nextStatus,
 } from '@/lib/validation';
 import type { Profile } from '@/lib/model';
@@ -27,6 +30,13 @@ function decodeOrder(row: Record<string, unknown>) {
   const { last_transition_id: _transition, ...rest } = row;
   return {
     ...rest,
+    sku_id: typeof row.sku_id === 'string' ? row.sku_id : '',
+    sku_snapshot:
+      typeof row.sku_snapshot === 'string' && row.sku_snapshot
+        ? JSON.parse(row.sku_snapshot)
+        : null,
+    batch_count: Number(row.batch_count || 1),
+    stock_deducted_grams: Number(row.stock_deducted_grams || 0),
     profile_snapshot: JSON.parse(String(row.profile_snapshot)),
   };
 }
@@ -69,7 +79,7 @@ export async function GET(request: Request) {
       throw new InputError('记录筛选无效。');
     const realOnly = source === 'real';
     if (kind === 'catalog') {
-      const [customers, beans, profiles, stats, demo] = await db.batch<
+      const [customers, beans, profiles, skus, stats, demo] = await db.batch<
         Record<string, unknown>
       >([
         db.prepare(
@@ -88,6 +98,11 @@ export async function GET(request: Request) {
             ' ORDER BY updated_at DESC',
         ),
         db.prepare(
+          'SELECT * FROM bean_skus' +
+            (realOnly ? ' WHERE is_demo=0' : '') +
+            ' ORDER BY updated_at DESC',
+        ),
+        db.prepare(
           'SELECT status,COUNT(*) AS count FROM orders' +
             (realOnly ? ' WHERE is_demo=0' : '') +
             ' GROUP BY status',
@@ -100,11 +115,26 @@ export async function GET(request: Request) {
         customers: customers.results,
         beans: beans.results,
         profiles: profiles.results.map(decodeProfile),
+        skus: skus.results,
         demo_counts: demo.results[0],
         stats: Object.assign(
           { waiting: 0, roasting: 0, completed: 0 },
           Object.fromEntries(stats.results.map((r) => [r.status, r.count])),
         ),
+      });
+    }
+    if (kind === 'operations') {
+      const [active, completed, shipments, movements] = await db.batch<Record<string, unknown>>([
+        db.prepare("SELECT * FROM orders WHERE status IN ('waiting','roasting')" + (realOnly ? ' AND is_demo=0' : '') + ' ORDER BY due_date ASC,created_at ASC LIMIT 300'),
+        db.prepare("SELECT * FROM orders WHERE status='completed'" + (realOnly ? ' AND is_demo=0' : '') + ' ORDER BY completed_at DESC LIMIT 300'),
+        db.prepare('SELECT s.*,o.code AS order_code,o.bean_name,o.quantity_grams FROM shipments s LEFT JOIN orders o ON o.id=s.order_id' + (realOnly ? ' WHERE s.is_sample=1 OR o.is_demo=0' : '') + ' ORDER BY s.shipped_at DESC LIMIT 300'),
+        db.prepare('SELECT m.*,s.label AS sku_label,b.name AS bean_name FROM stock_movements m JOIN bean_skus s ON s.id=m.sku_id JOIN beans b ON b.id=s.bean_id' + (realOnly ? ' WHERE s.is_demo=0' : '') + ' ORDER BY m.occurred_at DESC LIMIT 80'),
+      ]);
+      return json({
+        active_orders: active.results.map(decodeOrder),
+        completed_orders: completed.results.map(decodeOrder),
+        shipments: shipments.results,
+        movements: movements.results,
       });
     }
     if (kind === 'detail') {
@@ -220,6 +250,15 @@ export async function POST(request: Request) {
         .run();
       return json({ id }, 201);
     }
+    if (b.kind === 'sku') {
+      const x = skuInput(b);
+      const sourceBean = await db.prepare('SELECT is_demo FROM beans WHERE id=?').bind(x.bean_id).first<{ is_demo: number }>();
+      if (!sourceBean) throw new InputError('请先保存这款豆子。');
+      await db.prepare('INSERT INTO bean_skus(id,bean_id,label,harvest_year,process,altitude_m,batch_code,stock_grams,is_demo,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(id, x.bean_id, x.label, x.harvest_year, x.process, x.altitude_m, x.batch_code, x.stock_grams, sourceBean.is_demo || 0, now, now).run();
+      if (x.stock_grams > 0)
+        await db.prepare("INSERT INTO stock_movements(id,sku_id,movement_type,delta_grams,reference_id,notes,occurred_at) VALUES(?,?,'in',?,'','创建规格时录入',?)").bind('stock-'+id, id, x.stock_grams, now).run();
+      return json({ id }, 201);
+    }
     if (b.kind === 'profile') {
       const x = profileInput(b);
       const sourceBean = await db
@@ -247,6 +286,30 @@ export async function POST(request: Request) {
         .run();
       return json({ id }, 201);
     }
+    if (b.kind === 'inventory') {
+      const x = inventoryInput(b);
+      if (x.delta_grams === 0) throw new InputError('库存变动不能为 0。');
+      const sku = await db.prepare('SELECT stock_grams FROM bean_skus WHERE id=?').bind(x.sku_id).first<{ stock_grams: number }>();
+      if (!sku) throw new InputError('找不到这个豆子规格。', 404);
+      if (Number(sku.stock_grams) + x.delta_grams < 0) throw new InputError('调整后的库存不能小于 0。');
+      const movementType = x.delta_grams > 0 ? 'in' : 'adjustment';
+      await db.batch([
+        db.prepare('UPDATE bean_skus SET stock_grams=stock_grams+?,updated_at=? WHERE id=?').bind(x.delta_grams, now, x.sku_id),
+        db.prepare('INSERT INTO stock_movements(id,sku_id,movement_type,delta_grams,reference_id,notes,occurred_at) VALUES(?,?,?,?,?,?,?)').bind(id, x.sku_id, movementType, x.delta_grams, '', x.notes, now),
+      ]);
+      return json({ id }, 201);
+    }
+    if (b.kind === 'shipment') {
+      const x = shipmentInput(b);
+      if (x.order_id) {
+        const order = await db.prepare("SELECT id FROM orders WHERE id=? AND status='completed'").bind(x.order_id).first();
+        if (!order) throw new InputError('这张订单还没有完成烘焙。');
+        const existingShipment = await db.prepare('SELECT id FROM shipments WHERE order_id=?').bind(x.order_id).first();
+        if (existingShipment) throw new InputError('这张订单已经登记过发货。');
+      }
+      await db.prepare("INSERT INTO shipments(id,order_id,customer_name,carrier,tracking_number,status,is_sample,notes,shipped_at) VALUES(?,?,?,?,?,'shipped',?,?,?)").bind(id, x.order_id, x.customer_name, x.carrier, x.tracking_number, x.is_sample, x.notes, now).run();
+      return json({ id }, 201);
+    }
     if (b.kind !== 'order') throw new InputError('未找到这个功能。', 404);
     const x = orderInput(b);
     const existing = await db
@@ -259,7 +322,9 @@ export async function POST(request: Request) {
           'customer_id',
           'bean_id',
           'profile_id',
+          'sku_id',
           'quantity_grams',
+          'batch_count',
           'due_date',
           'notes',
         ].some((key) => existing[key] !== x[key as keyof typeof x])
@@ -271,7 +336,7 @@ export async function POST(request: Request) {
       }
       return json({ id: existing.id, code: existing.code });
     }
-    const [customer, bean, profileRow] = await Promise.all([
+    const [customer, bean, profileRow, sku] = await Promise.all([
       db
         .prepare('SELECT * FROM customers WHERE id=?')
         .bind(x.customer_id)
@@ -281,9 +346,12 @@ export async function POST(request: Request) {
         .prepare('SELECT * FROM profiles WHERE id=? AND bean_id=?')
         .bind(x.profile_id, x.bean_id)
         .first(),
+      db.prepare('SELECT * FROM bean_skus WHERE id=? AND bean_id=?').bind(x.sku_id, x.bean_id).first(),
     ]);
-    if (!customer || !bean || !profileRow)
-      throw new InputError('客户、豆子或烘焙方案已变化，请重新选择。');
+    if (!customer || !bean || !profileRow || !sku)
+      throw new InputError('客户、豆子规格或烘焙方案已变化，请重新选择。');
+    if (Number(sku.stock_grams) < x.quantity_grams)
+      throw new InputError('这个规格的库存不足，请先入库或减少订单重量。');
     const profile = decodeProfile(profileRow) as Profile;
     const isDemo = customer.is_demo || bean.is_demo || profile.is_demo ? 1 : 0;
     const code =
@@ -294,7 +362,7 @@ export async function POST(request: Request) {
     const inserted = await db.batch<Record<string, unknown>>([
       db
         .prepare(
-          "INSERT OR IGNORE INTO orders(id,code,customer_id,bean_id,profile_id,customer_name,bean_name,profile_snapshot,quantity_grams,due_date,notes,status,is_demo,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,'waiting',?,?,?)",
+          "INSERT OR IGNORE INTO orders(id,code,customer_id,bean_id,profile_id,customer_name,bean_name,sku_id,sku_snapshot,profile_snapshot,quantity_grams,batch_count,stock_deducted_grams,due_date,notes,status,is_demo,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'waiting',?,?,?)",
         )
         .bind(
           x.id,
@@ -304,7 +372,11 @@ export async function POST(request: Request) {
           x.profile_id,
           customer.name,
           bean.name,
+          x.sku_id,
+          JSON.stringify(sku),
           JSON.stringify(profile),
+          x.quantity_grams,
+          x.batch_count,
           x.quantity_grams,
           x.due_date,
           x.notes,
@@ -312,6 +384,8 @@ export async function POST(request: Request) {
           now,
           now,
         ),
+      db.prepare('UPDATE bean_skus SET stock_grams=stock_grams-?,updated_at=? WHERE id=? AND stock_grams>=?').bind(x.quantity_grams, now, x.sku_id, x.quantity_grams),
+      db.prepare("INSERT OR IGNORE INTO stock_movements(id,sku_id,movement_type,delta_grams,reference_id,notes,occurred_at) VALUES(?,?,'order',?,?,?,?)").bind('stock-'+x.id, x.sku_id, -x.quantity_grams, x.id, '创建订单自动扣减', now),
       db
         .prepare(
           "INSERT OR IGNORE INTO order_events(id,order_id,status,occurred_at) VALUES(?,?,'waiting',?)",
@@ -331,6 +405,32 @@ export async function PATCH(request: Request) {
     const db = await getD1();
     const id = text(b.id, '记录', 80, true);
     const now = new Date().toISOString();
+    if (b.kind === 'shipment-status') {
+      const target = text(b.status, '物流状态', 20, true);
+      if (target !== 'delivered') throw new InputError('物流状态无效。');
+      const r = await db.prepare("UPDATE shipments SET status='delivered',delivered_at=? WHERE id=? AND status='shipped'").bind(now, id).run();
+      if (!r.meta.changes) throw new InputError('发货记录已变化，请刷新。', 409);
+      return json({ id, status: target });
+    }
+    if (b.kind === 'batch-status') {
+      if (!Array.isArray(b.ids) || !b.ids.length || b.ids.length > 100) throw new InputError('请选择需要处理的订单。');
+      const target = text(b.status, '订单状态', 20, true);
+      if (!['roasting', 'completed'].includes(target)) throw new InputError('订单状态无效。');
+      const ids = b.ids.map((value) => text(value, '订单', 80, true));
+      const expected = target === 'roasting' ? 'waiting' : 'roasting';
+      const timestamp = target === 'roasting' ? 'started_at' : 'completed_at';
+      const statements = ids.flatMap((orderId) => {
+        const eventId = crypto.randomUUID();
+        return [
+          db.prepare('UPDATE orders SET status=?,' + timestamp + '=?,updated_at=?,last_transition_id=? WHERE id=? AND status=?').bind(target, now, now, eventId, orderId, expected),
+          db.prepare('INSERT INTO order_events(id,order_id,status,occurred_at) SELECT ?,id,?,? FROM orders WHERE id=? AND last_transition_id=?').bind(eventId, target, now, orderId, eventId),
+        ];
+      });
+      const results = await db.batch(statements);
+      const changed = results.filter((_, index) => index % 2 === 0).reduce((n, r) => n + Number(r.meta.changes), 0);
+      if (!changed) throw new InputError('订单进度已变化，请刷新后再操作。', 409);
+      return json({ changed, status: target });
+    }
     if (b.kind === 'customer') {
       const x = customerInput(b);
       const r = await db

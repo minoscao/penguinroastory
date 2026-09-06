@@ -8,8 +8,10 @@ const endpoint = origin + '/api/roastery';
 const records = {
   customer: null,
   bean: null,
+  sku: null,
   profile: null,
   order: crypto.randomUUID(),
+  shipment: null,
 };
 await mkdir('work', { recursive: true });
 const persist = () =>
@@ -55,6 +57,22 @@ try {
   );
   records.bean = bean.id;
   await persist();
+  const sku = await call(
+    'POST',
+    {
+      kind: 'sku',
+      bean_id: bean.id,
+      label: '2026 测试水洗批次',
+      harvest_year: '2026',
+      process: '水洗',
+      altitude_m: 1900,
+      batch_code: 'TEST-2026',
+      stock_grams: 5000,
+    },
+    201,
+  );
+  records.sku = sku.id;
+  await persist();
   const profileBody = {
     kind: 'profile',
     bean_id: bean.id,
@@ -75,8 +93,10 @@ try {
     id: records.order,
     customer_id: customer.id,
     bean_id: bean.id,
+    sku_id: sku.id,
     profile_id: profile.id,
     quantity_grams: 3000,
+    batch_count: 3,
     due_date: '2026-09-01',
     notes: '完整流程验证',
   };
@@ -84,6 +104,12 @@ try {
   const order = await call('POST', body, 201);
   const duplicate = await call('POST', body);
   assert.equal(order.id, duplicate.id);
+  assert.equal(
+    (await get({ kind: 'catalog', source: 'real' })).skus.find(
+      (item) => item.id === sku.id,
+    ).stock_grams,
+    2000,
+  );
   assert.equal(
     (await get({ kind: 'orders', q: records.order, status: 'waiting' })).total,
     1,
@@ -130,6 +156,31 @@ try {
     (await get({ kind: 'orders', q: records.order, status: 'waiting' })).total,
     0,
   );
+  const shipment = await call(
+    'POST',
+    {
+      kind: 'shipment',
+      order_id: order.id,
+      customer_name: '测试专用客户',
+      carrier: '顺丰',
+      tracking_number: 'TEST-' + records.order,
+      is_sample: 0,
+    },
+    201,
+  );
+  records.shipment = shipment.id;
+  await persist();
+  assert.equal(
+    (await get({ kind: 'operations', source: 'real' })).shipments.find(
+      (item) => item.id === shipment.id,
+    ).status,
+    'shipped',
+  );
+  await call('PATCH', {
+    kind: 'shipment-status',
+    id: shipment.id,
+    status: 'delivered',
+  });
   await call(
     'PATCH',
     { kind: 'status', id: order.id, status: 'roasting' },
@@ -208,7 +259,7 @@ try {
   });
   assert.equal(cross.status, 403);
   console.log(
-    'PASS: create/edit catalogs, parameter snapshots, duplicate submission, complete lifecycle, search/status filters, concurrent completion, timestamps, cross-origin rejection',
+    'PASS: product SKU, inventory deduction, merged workflow data, shipment lifecycle, catalogs, snapshots, status filters and request safety',
   );
 } finally {
   await persist();

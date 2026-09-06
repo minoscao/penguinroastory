@@ -21,6 +21,15 @@ export async function seedDemo(db: D1Database) {
           b.updated_at,
         ),
     );
+  const demoSkus = [
+    ['demo-v2-sku-ethiopia', 'demo-v1-bean-ethiopia', '2026 水洗批次', '2026', '水洗', 2050, 'ETH-2601', 18000],
+    ['demo-v2-sku-colombia', 'demo-v1-bean-colombia', '2025 蜜处理批次', '2025', '蜜处理', 1850, 'COL-2508', 32000],
+    ['demo-v2-sku-brazil', 'demo-v1-bean-brazil', '2025 日晒批次', '2025', '日晒', 1100, 'BRA-2512', 48000],
+  ] as const;
+  for (const s of demoSkus)
+    statements.push(
+      db.prepare('INSERT OR IGNORE INTO bean_skus(id,bean_id,label,harvest_year,process,altitude_m,batch_code,stock_grams,is_demo,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,1,?,?)').bind(...s, new Date().toISOString(), new Date().toISOString()),
+    );
   for (const c of data.customers)
     statements.push(
       db
@@ -61,7 +70,7 @@ export async function seedDemo(db: D1Database) {
     statements.push(
       db
         .prepare(
-          'INSERT OR IGNORE INTO orders(id,code,customer_id,bean_id,profile_id,customer_name,bean_name,profile_snapshot,quantity_grams,due_date,notes,status,is_demo,created_at,started_at,completed_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?)',
+          'INSERT OR IGNORE INTO orders(id,code,customer_id,bean_id,profile_id,customer_name,bean_name,sku_id,sku_snapshot,profile_snapshot,quantity_grams,batch_count,stock_deducted_grams,due_date,notes,status,is_demo,created_at,started_at,completed_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?)',
         )
         .bind(
           o.id,
@@ -71,8 +80,12 @@ export async function seedDemo(db: D1Database) {
           o.profile_id,
           o.customer_name,
           o.bean_name,
+          o.sku_id,
+          null,
           JSON.stringify(o.profile_snapshot),
           o.quantity_grams,
+          o.batch_count,
+          0,
           o.due_date,
           o.notes,
           o.status,

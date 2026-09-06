@@ -95,6 +95,18 @@ export function beanInput(v: unknown) {
     notes: text(b.notes, '风味与备注', 2000),
   };
 }
+export function skuInput(v: unknown) {
+  const b = object(v);
+  return {
+    bean_id: text(b.bean_id, '豆子产品', 80, true),
+    label: text(b.label, '规格名称', 100, true),
+    harvest_year: text(b.harvest_year, '年份', 20),
+    process: text(b.process, '处理法', 100),
+    altitude_m: number(b.altitude_m || 0, '海拔', 0, 10000, true),
+    batch_code: text(b.batch_code, '批次编号', 80),
+    stock_grams: number(b.stock_grams || 0, '初始库存（克）', 0, 100000000, true),
+  };
+}
 export function profileInput(v: unknown) {
   const b = object(v);
   if (!Array.isArray(b.points) || b.points.length < 2 || b.points.length > 30)
@@ -133,6 +145,7 @@ export function orderInput(v: unknown) {
     id,
     customer_id: text(b.customer_id, '客户', 80, true),
     bean_id: text(b.bean_id, '豆子', 80, true),
+    sku_id: text(b.sku_id, '豆子规格', 80, true),
     profile_id: text(b.profile_id, '烘焙方案', 80, true),
     quantity_grams: number(
       b.quantity_grams,
@@ -141,8 +154,28 @@ export function orderInput(v: unknown) {
       100000000,
       true,
     ),
+    batch_count: number(b.batch_count ?? 1, '烘焙仓数', 1, 1000, true),
     due_date: date(b.due_date),
     notes: text(b.notes, '订单备注', 2000),
+  };
+}
+export function inventoryInput(v: unknown) {
+  const b = object(v);
+  return {
+    sku_id: text(b.sku_id, '豆子规格', 80, true),
+    delta_grams: number(b.delta_grams, '库存变动重量（克）', -100000000, 100000000, true),
+    notes: text(b.notes, '库存备注', 500),
+  };
+}
+export function shipmentInput(v: unknown) {
+  const b = object(v);
+  return {
+    order_id: text(b.order_id, '订单', 80),
+    customer_name: text(b.customer_name, '客户名称', 100, true),
+    carrier: text(b.carrier, '快递公司', 50, true),
+    tracking_number: text(b.tracking_number, '快递单号', 100, true),
+    is_sample: number(b.is_sample ?? 0, '样品标记', 0, 1, true),
+    notes: text(b.notes, '发货备注', 500),
   };
 }
 export function nextStatus(current: string, target: string) {

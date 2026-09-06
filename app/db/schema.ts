@@ -29,6 +29,28 @@ export const beans = sqliteTable('beans', {
   created_at: text('created_at').notNull(),
   updated_at: text('updated_at').notNull(),
 });
+export const beanSkus = sqliteTable(
+  'bean_skus',
+  {
+    id: text('id').primaryKey(),
+    bean_id: text('bean_id')
+      .notNull()
+      .references(() => beans.id),
+    label: text('label').notNull(),
+    harvest_year: text('harvest_year').notNull().default(''),
+    process: text('process').notNull().default(''),
+    altitude_m: integer('altitude_m').notNull().default(0),
+    batch_code: text('batch_code').notNull().default(''),
+    stock_grams: integer('stock_grams').notNull().default(0),
+    is_demo: integer('is_demo').notNull().default(0),
+    created_at: text('created_at').notNull(),
+    updated_at: text('updated_at').notNull(),
+  },
+  (t) => [
+    index('idx_bean_skus_bean').on(t.bean_id),
+    check('sku_stock_non_negative', sql`${t.stock_grams}>=0`),
+  ],
+);
 export const profiles = sqliteTable(
   'profiles',
   {
@@ -69,8 +91,14 @@ export const orders = sqliteTable(
       .references(() => profiles.id),
     customer_name: text('customer_name').notNull(),
     bean_name: text('bean_name').notNull(),
+    sku_id: text('sku_id').notNull().default(''),
+    sku_snapshot: text('sku_snapshot'),
     profile_snapshot: text('profile_snapshot').notNull(),
     quantity_grams: integer('quantity_grams').notNull(),
+    batch_count: integer('batch_count').notNull().default(1),
+    stock_deducted_grams: integer('stock_deducted_grams')
+      .notNull()
+      .default(0),
     due_date: text('due_date').notNull().default(''),
     notes: text('notes').notNull().default(''),
     status: text('status').notNull().default('waiting'),
@@ -89,6 +117,40 @@ export const orders = sqliteTable(
       sql`${t.status} IN ('waiting','roasting','completed')`,
     ),
     check('order_quantity_positive', sql`${t.quantity_grams}>0`),
+  ],
+);
+export const stockMovements = sqliteTable(
+  'stock_movements',
+  {
+    id: text('id').primaryKey(),
+    sku_id: text('sku_id')
+      .notNull()
+      .references(() => beanSkus.id),
+    movement_type: text('movement_type').notNull(),
+    delta_grams: integer('delta_grams').notNull(),
+    reference_id: text('reference_id').notNull().default(''),
+    notes: text('notes').notNull().default(''),
+    occurred_at: text('occurred_at').notNull(),
+  },
+  (t) => [index('idx_stock_movements_sku').on(t.sku_id, t.occurred_at)],
+);
+export const shipments = sqliteTable(
+  'shipments',
+  {
+    id: text('id').primaryKey(),
+    order_id: text('order_id').notNull().default(''),
+    customer_name: text('customer_name').notNull(),
+    carrier: text('carrier').notNull().default(''),
+    tracking_number: text('tracking_number').notNull().default(''),
+    status: text('status').notNull().default('shipped'),
+    is_sample: integer('is_sample').notNull().default(0),
+    notes: text('notes').notNull().default(''),
+    shipped_at: text('shipped_at').notNull(),
+    delivered_at: text('delivered_at'),
+  },
+  (t) => [
+    index('idx_shipments_order').on(t.order_id),
+    index('idx_shipments_status').on(t.status, t.shipped_at),
   ],
 );
 export const orderEvents = sqliteTable(

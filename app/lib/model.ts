@@ -26,6 +26,19 @@ export type Bean = {
   created_at: string;
   updated_at: string;
 };
+export type BeanSku = {
+  id: string;
+  bean_id: string;
+  label: string;
+  harvest_year: string;
+  process: string;
+  altitude_m: number;
+  batch_code: string;
+  stock_grams: number;
+  is_demo: number;
+  created_at: string;
+  updated_at: string;
+};
 export type Point = {
   stage: string;
   seconds: number;
@@ -56,8 +69,12 @@ export type RoastOrder = {
   profile_id: string;
   customer_name: string;
   bean_name: string;
+  sku_id: string;
+  sku_snapshot: BeanSku | null;
   profile_snapshot: Profile;
   quantity_grams: number;
+  batch_count: number;
+  stock_deducted_grams: number;
   due_date: string;
   notes: string;
   status: Status;
@@ -65,6 +82,30 @@ export type RoastOrder = {
   started_at: string | null;
   completed_at: string | null;
   updated_at: string;
+};
+export type Shipment = {
+  id: string;
+  order_id: string;
+  customer_name: string;
+  carrier: string;
+  tracking_number: string;
+  status: 'shipped' | 'delivered';
+  is_sample: number;
+  notes: string;
+  shipped_at: string;
+  delivered_at: string | null;
+  order_code?: string;
+  bean_name?: string;
+  quantity_grams?: number;
+};
+export type StockMovement = {
+  id: string;
+  sku_id: string;
+  movement_type: 'in' | 'order' | 'adjustment';
+  delta_grams: number;
+  reference_id: string;
+  notes: string;
+  occurred_at: string;
 };
 export type OrderEvent = {
   id: string;
@@ -75,6 +116,7 @@ export type OrderEvent = {
 export type Catalog = {
   customers: Customer[];
   beans: Bean[];
+  skus: BeanSku[];
   profiles: Profile[];
   stats: Record<Status, number>;
   demo_counts?: {
@@ -87,7 +129,7 @@ export type Catalog = {
 export const statusLabels: Record<Status, string> = {
   waiting: '等待烘焙',
   roasting: '正在烘焙',
-  completed: '已完成',
+  completed: '烘焙完成',
 };
 export function timeLabel(seconds: number) {
   return Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0');

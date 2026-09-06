@@ -187,11 +187,15 @@ export function makeDemoDataset(anchor = new Date().toISOString()) {
       profile_id: profile.id,
       customer_name: customer.name,
       bean_name: bean.name,
+      sku_id: ['demo-v2-sku-ethiopia', 'demo-v2-sku-colombia', 'demo-v2-sku-brazil'][i % 3],
+      sku_snapshot: null,
       profile_snapshot: profile,
       quantity_grams:
         customer.customer_type === 'individual'
           ? [250, 500, 1000, 1500][i % 4]
           : [5000, 8000, 12000, 20000][i % 4],
+      batch_count: customer.customer_type === 'individual' ? 1 : 2 + (i % 4),
+      stock_deducted_grams: 0,
       due_date: due(status === 'completed' ? -(i - 13) : i % 3),
       notes:
         '模拟订单 · ' +

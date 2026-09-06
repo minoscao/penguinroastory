@@ -34,6 +34,9 @@ import {
   MapPin,
   Sparkles,
   PackageCheck,
+  Warehouse,
+  Truck,
+  LayoutDashboard,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -75,11 +78,20 @@ import {
   type Catalog,
   type Status,
 } from '@/lib/model';
+import OperationsPanel from '@/components/operations';
 
-type View = 'orders' | 'completed' | 'beans' | 'customers';
+type View =
+  | 'orders'
+  | 'roasting'
+  | 'fulfillment'
+  | 'admin'
+  | 'completed'
+  | 'beans'
+  | 'customers';
 type Modal =
   | { type: 'customer'; record?: Customer }
   | { type: 'bean'; record?: Bean }
+  | { type: 'sku'; bean: Bean }
   | { type: 'profiles'; bean: Bean }
   | { type: 'profile'; bean: Bean; record?: Profile }
   | { type: 'order' }
@@ -100,9 +112,24 @@ const views: Record<
     subtitle: '把今天的烘焙安排好，让每一张订单都有着落。',
     eyebrow: 'ROASTING WORKSPACE',
   },
+  roasting: {
+    title: '烘焙工作台',
+    subtitle: '把相同豆子与曲线的订单合并成一批，少切换、多专注。',
+    eyebrow: 'ROAST TOGETHER',
+  },
+  fulfillment: {
+    title: '发货工作台',
+    subtitle: '按客户整理待发货订单，快递和签收状态集中处理。',
+    eyebrow: 'PACK & DELIVER',
+  },
+  admin: {
+    title: '管理总览',
+    subtitle: '库存、订单占用和最近变动，在一个地方看清楚。',
+    eyebrow: 'ROASTERY CONTROL',
+  },
   completed: {
-    title: '已完成订单',
-    subtitle: '每一次完成都有记录，下一次复购有据可循。',
+    title: '烘焙完成记录',
+    subtitle: '烘焙参数完整保留，等待发货或复购时都能回看。',
     eyebrow: 'FINISHED WITH CARE',
   },
   beans: {
@@ -464,6 +491,9 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
           {(
             [
               { view: 'orders', url: '/', icon: ClipboardList },
+              { view: 'roasting', url: '/roasting', icon: Flame },
+              { view: 'fulfillment', url: '/fulfillment', icon: Truck },
+              { view: 'admin', url: '/admin', icon: LayoutDashboard },
               { view: 'completed', url: '/completed', icon: CheckCheck },
               { view: 'beans', url: '/beans', icon: BeanIcon },
               { view: 'customers', url: '/customers', icon: Users },
@@ -495,7 +525,7 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
       <main className="main">
         <div className="topline">
           <span>工作台 / {details.title}</span>
-          <span>基础版本 · 不管理库存</span>
+          <span>订单 · 烘焙 · 库存 · 发货</span>
         </div>
         <header className="page-header">
           <div>
@@ -506,23 +536,25 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
             </h1>
             <p className="subtitle">{details.subtitle}</p>
           </div>
-          <Button
-            className="primary-action"
-            onClick={() =>
-              view === 'beans'
-                ? open({ type: 'bean' })
+          {(view === 'orders' || view === 'completed' || view === 'beans' || view === 'customers') && (
+            <Button
+              className="primary-action"
+              onClick={() =>
+                view === 'beans'
+                  ? open({ type: 'bean' })
+                  : view === 'customers'
+                    ? open({ type: 'customer' })
+                    : newOrder()
+              }
+            >
+              <Plus />
+              {view === 'beans'
+                ? '新增豆子'
                 : view === 'customers'
-                  ? open({ type: 'customer' })
-                  : newOrder()
-            }
-          >
-            <Plus />
-            {view === 'beans'
-              ? '新增豆子'
-              : view === 'customers'
-                ? '新增客户'
-                : '新建订单'}
-          </Button>
+                  ? '新增客户'
+                  : '新建订单'}
+            </Button>
+          )}
         </header>
         {!!catalog?.demo_counts?.customers && (
           <div className="demo-banner">
@@ -612,13 +644,24 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
             <CheckCheck size={25} />
             <div>
               <strong>
-                {count ? count.completed : '—'} 张订单，已完成交付
+                {count ? count.completed : '—'} 张订单，已完成烘焙
               </strong>
-              <p>保留客户、豆子和当时的烘焙参数，随时回看。</p>
+              <p>发货状态请到“发货工作台”查看和处理。</p>
             </div>
           </div>
         )}
-        {isOrders ? (
+        {view === 'roasting' || view === 'fulfillment' || view === 'admin' ? (
+          <OperationsPanel
+            view={view}
+            catalog={catalog}
+            source={source}
+            revision={revision}
+            onChanged={(notice) => {
+              setToast(notice);
+              setRevision((value) => value + 1);
+            }}
+          />
+        ) : isOrders ? (
           <section className="panel">
             <div className="panel-heading">
               <h2>
@@ -900,6 +943,19 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                         <p className="catalog-notes">
                           {b.notes || '还没有风味备注，随时记下你的观察。'}
                         </p>
+                        <div className="sku-preview">
+                          <div>
+                            <strong>
+                              {catalog.skus.filter((sku) => sku.bean_id === b.id).length} 个规格
+                            </strong>
+                            <span>
+                              库存 {weight(catalog.skus.filter((sku) => sku.bean_id === b.id).reduce((sum, sku) => sum + sku.stock_grams, 0))}
+                            </span>
+                          </div>
+                          <Button variant="outline" size="sm" onClick={() => open({ type: 'sku', bean: b })}>
+                            <Plus size={14} />新增规格
+                          </Button>
+                        </div>
                         <div className="card-bottom">
                           <span>
                             <SlidersHorizontal size={15} />
@@ -1119,6 +1175,8 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                   ? modal.record
                     ? '编辑豆子'
                     : '新增豆子'
+                  : modal?.type === 'sku'
+                    ? modal.bean.name + ' · 新增规格'
                   : modal?.type === 'profiles'
                     ? modal.bean.name + ' · 烘焙方案'
                     : modal?.type === 'profile'
@@ -1132,7 +1190,9 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
             <DialogDescription>
               {modal?.type === 'order'
                 ? '选好客户、豆子和方案，安排这次烘焙。'
-                : modal?.type === 'profile'
+                : modal?.type === 'sku'
+                  ? '年份、处理法、海拔或批次不同，请分别建立规格。'
+                  : modal?.type === 'profile'
                   ? '记录你自己的目标参数。保存方案不会更改历史订单。'
                   : modal?.type === 'profiles'
                     ? '同一款豆子，可以保存不同的烘焙方案。'
@@ -1153,6 +1213,9 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
               busy={busy}
               mutate={mutate}
             />
+          )}
+          {modal?.type === 'sku' && (
+            <SkuForm bean={modal.bean} busy={busy} mutate={mutate} />
           )}
           {modal?.type === 'profiles' && catalog && (
             <div className="profiles-list">
@@ -1228,6 +1291,62 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+function SkuForm({
+  bean,
+  busy,
+  mutate,
+}: {
+  bean: Bean;
+  busy: boolean;
+  mutate: Mutate;
+}) {
+  async function submit(e: SyntheticEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const data = Object.fromEntries(new FormData(e.currentTarget));
+    await mutate(
+      'POST',
+      {
+        ...data,
+        kind: 'sku',
+        bean_id: bean.id,
+        stock_grams: Math.round(Number(data.stock_kg || 0) * 1000),
+      },
+      '豆子规格和初始库存已保存',
+    );
+  }
+  return (
+    <form onSubmit={submit}>
+      <fieldset disabled={busy} className="form-grid">
+        <Field label="规格名称 *" wide>
+          <Input name="label" required maxLength={100} placeholder="例如：2026 水洗批次" />
+        </Field>
+        <Field label="年份">
+          <Input name="harvest_year" maxLength={20} placeholder="2026" />
+        </Field>
+        <Field label="处理法">
+          <Input name="process" maxLength={100} defaultValue={bean.process} placeholder="水洗、日晒…" />
+        </Field>
+        <Field label="海拔（米）">
+          <Input name="altitude_m" type="number" min="0" max="10000" defaultValue="0" />
+        </Field>
+        <Field label="批次编号">
+          <Input name="batch_code" maxLength={80} placeholder="例如 ETH-2601" />
+        </Field>
+        <Field label="初始库存（kg）*" wide>
+          <Input name="stock_kg" type="number" required min="0" max="100000" step="0.001" defaultValue="0" />
+        </Field>
+        <p className="hint field-wide">保存以后，这个规格会出现在新建订单和库存管理中。</p>
+        <div className="form-actions field-wide">
+          <span>库存以生豆重量记录</span>
+          <Button type="submit" className="primary-action">
+            {busy ? '正在保存…' : '保存规格'}
+            <Check size={16} />
+          </Button>
+        </div>
+      </fieldset>
+    </form>
   );
 }
 function CatalogForm({
@@ -1619,9 +1738,16 @@ function OrderForm({
   const [beanId, setBeanId] = useState(''),
     [customerId, setCustomerId] = useState(''),
     [profileId, setProfileId] = useState(''),
+    [skuId, setSkuId] = useState(''),
+    [customerQuery, setCustomerQuery] = useState(''),
     [requestId] = useState(() => crypto.randomUUID());
   const profiles = catalog.profiles.filter((p) => p.bean_id === beanId);
+  const skus = catalog.skus.filter((s) => s.bean_id === beanId);
+  const customers = catalog.customers.filter((c) =>
+    (c.name + c.contact + c.phone).toLowerCase().includes(customerQuery.toLowerCase()),
+  );
   const selected = profiles.find((p) => p.id === profileId);
+  const selectedSku = skus.find((s) => s.id === skuId);
   async function submit(e: SyntheticEvent<HTMLFormElement>) {
     e.preventDefault();
     const data = Object.fromEntries(new FormData(e.currentTarget));
@@ -1632,8 +1758,10 @@ function OrderForm({
         kind: 'order',
         id: requestId,
         bean_id: beanId,
+        sku_id: skuId,
         profile_id: profileId,
         quantity_grams: Math.round(Number(data.quantity_kg) * 1000),
+        batch_count: Number(data.batch_count),
       },
       '订单已创建，正在等待烘焙',
     );
@@ -1659,6 +1787,12 @@ function OrderForm({
     <form onSubmit={submit}>
       <fieldset disabled={busy} className="form-grid">
         <Field label="客户 *" wide>
+          <Input
+            aria-label="搜索客户姓名或手机尾号"
+            value={customerQuery}
+            onChange={(e) => setCustomerQuery(e.target.value)}
+            placeholder="先输入姓名、单位或手机尾号查找"
+          />
           <NativeSelect
             name="customer_id"
             required
@@ -1668,7 +1802,7 @@ function OrderForm({
             <option value="" disabled>
               选择这张订单的客户
             </option>
-            {catalog.customers.map((c) => (
+            {customers.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name} · {customerTypes[c.customer_type]}
                 {c.is_demo ? '（模拟）' : ''}
@@ -1683,6 +1817,7 @@ function OrderForm({
             onChange={(e) => {
               setBeanId(e.target.value);
               setProfileId('');
+              setSkuId('');
             }}
           >
             <option value="" disabled>
@@ -1696,6 +1831,31 @@ function OrderForm({
             ))}
           </NativeSelect>
         </Field>
+        <Field label="豆子规格（SKU）*" wide>
+          <NativeSelect
+            value={skuId}
+            required
+            disabled={!beanId}
+            onChange={(e) => setSkuId(e.target.value)}
+          >
+            <option value="" disabled>
+              {beanId ? '选择年份、处理法与批次' : '请先选择豆子'}
+            </option>
+            {skus.map((sku) => (
+              <option key={sku.id} value={sku.id}>
+                {sku.label} · 可用 {weight(sku.stock_grams)}
+              </option>
+            ))}
+          </NativeSelect>
+        </Field>
+        {beanId && !skus.length && (
+          <div className="setup-notice field-wide">
+            这款豆子还没有具体规格，暂时不能建立订单。
+            <Button type="button" variant="outline" size="sm" onClick={() => open({ type: 'sku', bean: catalog.beans.find((b) => b.id === beanId)! })}>
+              <Plus />先添加规格
+            </Button>
+          </div>
+        )}
         <Field label="烘焙方案 *" wide>
           <NativeSelect
             value={profileId}
@@ -1758,7 +1918,7 @@ function OrderForm({
             <Curve points={selected.points} />
           </div>
         )}
-        <Field label="订购数量（熟豆 kg）*">
+        <Field label="订单重量（kg）*">
           <Input
             name="quantity_kg"
             type="number"
@@ -1766,12 +1926,19 @@ function OrderForm({
             min="0.001"
             max="100000"
             step="0.001"
-            placeholder="交给客户的熟豆净重"
+            placeholder="本次计划使用的生豆重量"
           />
         </Field>
         <Field label="交付日期">
           <Input name="due_date" type="date" />
         </Field>
+        <Field label="计划烘焙仓数 *">
+          <Input name="batch_count" type="number" required min="1" max="1000" step="1" defaultValue="1" />
+        </Field>
+        <div className="inventory-hint">
+          <Warehouse size={18} />
+          <span>创建后自动扣减生豆库存<strong>{selectedSku ? `当前可用 ${weight(selectedSku.stock_grams)}` : '请选择豆子规格'}</strong></span>
+        </div>
         <Field label="订单备注" wide>
           <Textarea
             name="notes"
@@ -1780,11 +1947,11 @@ function OrderForm({
           />
         </Field>
         <div className="hint field-wide">
-          订购数量是熟豆重量，方案投豆量是每锅生豆重量；本版不计算库存。
+          目前按订单重量扣减生豆库存；烘焙损耗与熟豆净重换算可以在下一阶段单独设置。
         </div>
         <div className="form-actions field-wide">
           <span>创建后为“等待烘焙”</span>
-          <Button type="submit" className="primary-action" disabled={!selected}>
+          <Button type="submit" className="primary-action" disabled={!selected || !selectedSku}>
             {busy ? '正在创建…' : '创建订单'}
             <ArrowRight size={16} />
           </Button>
