@@ -45,7 +45,7 @@ import type {
 type RoastBatch = {
   key: string;
   orders: RoastOrder[];
-  startedAt: number;
+  startedAt: number | null;
 };
 
 type RecordedPoint = {
@@ -157,18 +157,23 @@ export default function OperationsPanel({
   }
 
   async function startBatch(orders: RoastOrder[]) {
+    setRoastBatch({
+      key: orders.map((order) => order.id).join('-'),
+      orders,
+      startedAt: null,
+    });
+  }
+
+  async function beginBatch() {
+    if (!roastBatch) return null;
     const startedAt = Date.now();
     const ok = await mutate(
-      { kind: 'batch-status', id: orders[0].id, ids: orders.map((order) => order.id), status: 'roasting' },
-      `已开始 ${orders.length} 张合并订单`,
+      { kind: 'batch-status', id: roastBatch.orders[0].id, ids: roastBatch.orders.map((order) => order.id), status: 'roasting' },
+      `已开始 ${roastBatch.orders.length} 张合并订单`,
     );
-    if (ok) {
-      setRoastBatch({
-        key: orders.map((order) => order.id).join('-'),
-        orders,
-        startedAt,
-      });
-    }
+    if (!ok) return null;
+    setRoastBatch((current) => current ? { ...current, startedAt } : current);
+    return startedAt;
   }
 
   async function finishBatch() {
@@ -274,6 +279,7 @@ export default function OperationsPanel({
             <RoastConsole
               batch={roastBatch}
               busy={busy}
+              begin={beginBatch}
               finish={finishBatch}
             />
           )}
@@ -372,15 +378,19 @@ function RoastingBoard({
 function RoastConsole({
   batch,
   busy,
+  begin,
   finish,
 }: {
   batch: RoastBatch;
   busy: boolean;
+  begin: () => Promise<number | null>;
   finish: () => Promise<void>;
 }) {
   const profile = batch.orders[0].profile_snapshot;
   const [now, setNow] = useState(() => Date.now());
-  const [selectedStage, setSelectedStage] = useState('入豆');
+  const [selectedStage, setSelectedStage] = useState('');
+  const [chargeTemperature, setChargeTemperature] = useState('');
+  const [chargeWeight, setChargeWeight] = useState('');
   const [temperature, setTemperature] = useState('');
   const [typingStartedAt, setTypingStartedAt] = useState<number | null>(null);
   const [records, setRecords] = useState<RecordedPoint[]>([]);
@@ -390,10 +400,12 @@ function RoastConsole({
     return () => window.clearInterval(timer);
   }, []);
 
-  const elapsed = Math.max(0, Math.floor((now - batch.startedAt) / 1000));
+  const startedAt = batch.startedAt;
+  const started = startedAt !== null;
+  const elapsed = startedAt === null ? 0 : Math.max(0, Math.floor((now - startedAt) / 1000));
   const recordAt = Math.max(
     0,
-    Math.floor(((typingStartedAt || now) - batch.startedAt) / 1000),
+    startedAt === null ? 0 : Math.floor(((typingStartedAt || now) - startedAt) / 1000),
   );
   const chartData = useMemo(() => {
     const points = new Map<number, { seconds: number; plan?: number; actual?: number; stage?: string }>();
@@ -413,6 +425,7 @@ function RoastConsole({
   );
 
   function addDigit(digit: string) {
+    if (!started) return;
     if (!typingStartedAt) setTypingStartedAt(now);
     setTemperature((value) => (value.length >= 3 ? value : value + digit));
   }
@@ -426,6 +439,7 @@ function RoastConsole({
   }
 
   function recordTemperature() {
+    if (!started) return;
     const value = Number(temperature);
     if (!Number.isFinite(value) || value < 0 || value > 350) return;
     setRecords((current) => [
@@ -436,7 +450,19 @@ function RoastConsole({
     setTypingStartedAt(null);
   }
 
-  const stages = ['入豆', '回温', '转黄 / 开风门', '一爆', '二爆', '出豆'];
+  async function beginRecording() {
+    const inputTemperature = Number(chargeTemperature);
+    const inputWeight = Number(chargeWeight);
+    if (!Number.isFinite(inputTemperature) || inputTemperature < 0 || inputTemperature > 350) return;
+    if (!Number.isFinite(inputWeight) || inputWeight <= 0 || inputWeight > 100000) return;
+    const startedAt = await begin();
+    if (!startedAt) return;
+    setNow(startedAt);
+    setRecords([{ stage: '入豆', seconds: 0, temperature: inputTemperature }]);
+    setSelectedStage('回温');
+  }
+
+  const stages = ['准备入豆', '回温', '转黄 / 开风门', '一爆', '二爆', '出豆'];
   return (
     <div className="roast-console">
       <DialogHeader>
@@ -448,7 +474,7 @@ function RoastConsole({
               {profile.name} · {batch.orders.length} 张订单合并烘焙
             </DialogDescription>
           </div>
-          <div className="roast-clock"><TimerReset size={17} /><strong>{formatSeconds(elapsed)}</strong><span>本锅时间</span></div>
+          <div className="roast-clock"><TimerReset size={17} /><strong>{started ? formatSeconds(elapsed) : '待开始'}</strong><span>{started ? '本锅时间' : '填写入豆资料后开始'}</span></div>
         </div>
       </DialogHeader>
 
@@ -467,7 +493,7 @@ function RoastConsole({
             <Line type="linear" dataKey="actual" name="actual" stroke="#d2763c" strokeWidth={3} dot={{ r: 4, fill: '#fff', stroke: '#d2763c', strokeWidth: 2 }} activeDot={{ r: 6 }} isAnimationActive={false} connectNulls />
           </LineChart>
         </ChartContainer>
-        <p>{records.length ? `已记录 ${records.length} 个实际温度点，最近一点：${formatSeconds(records.at(-1)?.seconds || 0)} · ${records.at(-1)?.temperature} ℃` : '先按一个阶段，再输入温度；实际曲线会从第一个记录点开始出现。'}</p>
+        <p>{records.length ? `已记录 ${records.length} 个实际温度点，最近一点：${formatSeconds(records.at(-1)?.seconds || 0)} · ${records.at(-1)?.temperature} ℃` : '准备入豆后，填写温度与克重；开始录豆后会从 0:00 记录实际曲线。'}</p>
       </section>
 
       <section className="roast-controls">
@@ -482,21 +508,33 @@ function RoastConsole({
           </div>
         </div>
         <div className="temperature-pad">
+          {selectedStage === '准备入豆' && !started ? (
+            <div className="charge-setup">
+              <strong>准备入豆</strong>
+              <p>确认入豆温度与本锅投豆克重后，再开始记录时间。</p>
+              <label htmlFor="charge-temperature">入豆温度（℃）<Input id="charge-temperature" value={chargeTemperature} onChange={(event) => setChargeTemperature(event.target.value)} inputMode="numeric" type="number" min="0" max="350" placeholder="例如 185" /></label>
+              <label htmlFor="charge-weight">入豆克重（g）<Input id="charge-weight" value={chargeWeight} onChange={(event) => setChargeWeight(event.target.value)} inputMode="numeric" type="number" min="1" max="100000" placeholder="例如 1000" /></label>
+              <Button className="begin-roast" disabled={busy || !chargeTemperature || !chargeWeight} onClick={beginRecording}><Flame />开始录豆</Button>
+            </div>
+          ) : (
+            <>
           <div className="temperature-screen">
-            <span><Thermometer size={17} />正在记录：{selectedStage || '即时温度'}</span>
+            <span><Thermometer size={17} />正在记录：{selectedStage || '选择一个阶段或直接记录温度'}</span>
             <strong>{temperature || '—'}<small>℃</small></strong>
-            <p>记录时间 {formatSeconds(recordAt)}（从输入第一个数字起算）</p>
+            <p>{started ? `记录时间 ${formatSeconds(recordAt)}（从输入第一个数字起算）` : '请先点击“准备入豆”，填写资料并开始录豆。'}</p>
           </div>
           <div className="number-pad" aria-label="输入豆温">
-            {['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'].map((digit) => <button key={digit} onClick={() => addDigit(digit)}>{digit}</button>)}
-            <button className="erase" aria-label="删除最后一个数字" onClick={erase}><Delete size={20} /></button>
-            <button className="record" disabled={!temperature} onClick={recordTemperature}>确认温度</button>
+            {['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'].map((digit) => <button key={digit} disabled={!started} onClick={() => addDigit(digit)}>{digit}</button>)}
+            <button className="erase" disabled={!started} aria-label="删除最后一个数字" onClick={erase}><Delete size={20} /></button>
+            <button className="record" disabled={!started || !temperature} onClick={recordTemperature}>记录温度</button>
           </div>
+            </>
+          )}
         </div>
       </section>
       <div className="roast-console-footer">
         <span>温度点会按输入第一个数字时的时间写入曲线。</span>
-        <Button className="primary-action" disabled={busy} onClick={finish}><CheckCheck />结束本锅并标记完成</Button>
+        <Button className="primary-action" disabled={busy || !started} onClick={finish}><CheckCheck />结束本锅并标记完成</Button>
       </div>
     </div>
   );
