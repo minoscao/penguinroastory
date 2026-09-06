@@ -5,7 +5,6 @@ import Link from 'next/link';
 import {
   ArrowRight,
   Boxes,
-  Check,
   CheckCheck,
   ClipboardList,
   Delete,
@@ -52,6 +51,11 @@ type RecordedPoint = {
   stage: string;
   seconds: number;
   temperature: number;
+};
+
+type RoastProgress = {
+  chargedGrams: number;
+  targetGrams: number;
 };
 
 const roastTargets = [
@@ -124,6 +128,7 @@ export default function OperationsPanel({
   const [reload, setReload] = useState(0);
   const [roastMode, setRoastMode] = useState<'bean' | 'customer'>('bean');
   const [roastBatch, setRoastBatch] = useState<RoastBatch | null>(null);
+  const [roastProgress, setRoastProgress] = useState<Record<string, RoastProgress>>({});
   const [shipmentOrder, setShipmentOrder] = useState<RoastOrder | 'sample' | null>(null);
   const [inventorySku, setInventorySku] = useState<BeanSku | null>(null);
 
@@ -142,6 +147,17 @@ export default function OperationsPanel({
       });
     return () => controller.abort();
   }, [source, revision, reload]);
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      try {
+        const stored = window.localStorage.getItem('penguin-roast-progress');
+        if (stored) setRoastProgress(JSON.parse(stored) as Record<string, RoastProgress>);
+      } catch {
+        // The roasting screen remains usable if this browser cannot save local progress.
+      }
+    });
+  }, []);
 
   async function mutate(payload: Record<string, unknown>, notice: string, method = 'PATCH') {
     if (busy) return false;
@@ -172,7 +188,7 @@ export default function OperationsPanel({
     });
   }
 
-  async function beginBatch() {
+  async function beginBatch(chargedGrams: number) {
     if (!roastBatch) return null;
     const startedAt = Date.now();
     const ok = await mutate(
@@ -180,6 +196,19 @@ export default function OperationsPanel({
       `已开始 ${roastBatch.orders.length} 张合并订单`,
     );
     if (!ok) return null;
+    const progress = {
+      chargedGrams,
+      targetGrams: roastBatch.orders.reduce((sum, order) => sum + order.quantity_grams, 0),
+    };
+    setRoastProgress((current) => {
+      const next = { ...current, [roastBatch.key]: progress };
+      try {
+        window.localStorage.setItem('penguin-roast-progress', JSON.stringify(next));
+      } catch {
+        // The active console still keeps the current batch visible in this session.
+      }
+      return next;
+    });
     setRoastBatch((current) => current ? { ...current, startedAt } : current);
     return startedAt;
   }
@@ -222,9 +251,7 @@ export default function OperationsPanel({
           setMode={setRoastMode}
           busy={busy}
           startBatch={startBatch}
-          run={(ids, status, notice) =>
-            mutate({ kind: 'batch-status', id: ids[0], ids, status }, notice)
-          }
+          roastProgress={roastProgress}
         />
       )}
       {view === 'fulfillment' && (
@@ -304,7 +331,7 @@ function RoastingBoard({
   setMode,
   busy,
   startBatch,
-  run,
+  roastProgress,
 }: {
   data: OperationsData;
   catalog: Catalog;
@@ -312,7 +339,7 @@ function RoastingBoard({
   setMode: (mode: 'bean' | 'customer') => void;
   busy: boolean;
   startBatch: (orders: RoastOrder[]) => Promise<void>;
-  run: (ids: string[], status: 'roasting' | 'completed', notice: string) => void;
+  roastProgress: Record<string, RoastProgress>;
 }) {
   const groups = useMemo(() => {
     const map = new Map<string, RoastOrder[]>();
@@ -347,6 +374,10 @@ function RoastingBoard({
               const first = orders[0];
               const sku = catalog.skus.find((item) => item.id === first.sku_id);
               const total = orders.reduce((sum, order) => sum + order.quantity_grams, 0);
+              const batchKey = orders.map((order) => order.id).join('-');
+              const progress = roastProgress[batchKey];
+              const remaining = Math.max(0, total - (progress?.chargedGrams || 0));
+              const extra = Math.max(0, (progress?.chargedGrams || 0) - total);
               return (
                 <article className="roast-group" key={[first.status, first.sku_id, first.profile_id].join('-')}>
                   <div className={'group-icon ' + first.status}>{first.status === 'waiting' ? <Boxes /> : <Flame />}</div>
@@ -355,11 +386,10 @@ function RoastingBoard({
                     <p>{first.profile_snapshot.name} · {first.profile_snapshot.roast_level} · {orders.length} 位客户</p>
                     <div className="customer-chips">{orders.map((order) => <span key={order.id}>{order.customer_name} {kg(order.quantity_grams)}</span>)}</div>
                   </div>
-                  <div className="group-total"><small>合并重量</small><strong>{kg(total)}</strong><span>计划 {orders.reduce((sum, order) => sum + order.batch_count, 0)} 仓</span></div>
-                  <Button className="primary-action" disabled={busy} onClick={() => first.status === 'waiting' ? startBatch(orders) : run(orders.map((order) => order.id), 'completed', `已完成 ${orders.length} 张合并订单的烘焙`)}>
-                    {first.status === 'waiting' ? <Flame /> : <Check />}
-                    {first.status === 'waiting' ? '开始这一批' : '完成这一批'}
-                  </Button>
+                  <div className="group-total">
+                    {first.status === 'waiting' ? <><small>合并重量</small><strong>{kg(total)}</strong><span>计划 {orders.reduce((sum, order) => sum + order.batch_count, 0)} 仓</span></> : progress ? <><small>已记录烘焙</small><strong>{kg(progress.chargedGrams)}</strong><span>{extra ? `成品余量 ${kg(extra)}` : remaining ? `还差 ${kg(remaining)}` : '刚好完成订单重量'}</span></> : <><small>订单目标</small><strong>{kg(total)}</strong><span>等待录入本锅克重</span></>}
+                  </div>
+                  {first.status === 'waiting' ? <Button className="primary-action" disabled={busy} onClick={() => startBatch(orders)}><Flame />开始这一批</Button> : <span className="roasting-state"><Flame />烘焙中</span>}
                 </article>
               );
             })}
@@ -371,9 +401,7 @@ function RoastingBoard({
                 <div><strong>{order.customer_name}</strong><span>{order.code}</span></div>
                 <div><strong>{order.bean_name}</strong><span>{skuName(catalog.skus.find((item) => item.id === order.sku_id), order)}</span></div>
                 <strong>{kg(order.quantity_grams)}</strong>
-                <Button variant="outline" disabled={busy} onClick={() => order.status === 'waiting' ? startBatch([order]) : run([order.id], 'completed', '订单烘焙已完成')}>
-                  {order.status === 'waiting' ? '开始烘焙' : '完成烘焙'}<ArrowRight />
-                </Button>
+                {order.status === 'waiting' ? <Button variant="outline" disabled={busy} onClick={() => startBatch([order])}>开始烘焙<ArrowRight /></Button> : <span className="roasting-state"><Flame />烘焙中</span>}
               </article>
             ))}
           </div>
@@ -391,7 +419,7 @@ function RoastConsole({
 }: {
   batch: RoastBatch;
   busy: boolean;
-  begin: () => Promise<number | null>;
+  begin: (chargedGrams: number) => Promise<number | null>;
   finish: () => Promise<void>;
 }) {
   const profile = batch.orders[0].profile_snapshot;
@@ -467,7 +495,7 @@ function RoastConsole({
     const inputWeight = Number(chargeWeight);
     if (!Number.isFinite(inputTemperature) || inputTemperature < 0 || inputTemperature > 350) return;
     if (!Number.isFinite(inputWeight) || inputWeight <= 0 || inputWeight > 100000) return;
-    const startedAt = await begin();
+    const startedAt = await begin(inputWeight);
     if (!startedAt) return;
     setNow(startedAt);
     setRecords([{ stage: '入豆', seconds: 0, temperature: inputTemperature }]);

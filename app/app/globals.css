@@ -1713,6 +1713,21 @@ h2 {
   padding: 2px 7px;
   font-size: 10px;
 }
+.roasting-state {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 118px;
+  min-height: 42px;
+  padding: 0 14px;
+  color: #a65a2f;
+  background: #fcf0e8;
+  border: 1px solid #efd3c0;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 700;
+}
 .group-main > p {
   color: #829080;
   font-size: 11px;
