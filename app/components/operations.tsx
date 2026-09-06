@@ -45,6 +45,7 @@ type RoastBatch = {
   key: string;
   orders: RoastOrder[];
   startedAt: number | null;
+  machine: string;
 };
 
 type RecordedPoint = {
@@ -57,6 +58,7 @@ type RecordedPoint = {
 type RoastProgress = {
   chargedGrams: number;
   targetGrams: number;
+  machine: string;
 };
 
 const roastTargets = [
@@ -186,10 +188,11 @@ export default function OperationsPanel({
       key: orders.map((order) => order.id).join('-'),
       orders,
       startedAt: null,
+      machine: 'Sandouke 600',
     });
   }
 
-  async function beginBatch(chargedGrams: number) {
+  async function beginBatch(chargedGrams: number, machine: string) {
     if (!roastBatch) return null;
     const startedAt = Date.now();
     const ok = await mutate(
@@ -200,6 +203,7 @@ export default function OperationsPanel({
     const progress = {
       chargedGrams,
       targetGrams: roastBatch.orders.reduce((sum, order) => sum + order.quantity_grams, 0),
+      machine,
     };
     setRoastProgress((current) => {
       const next = { ...current, [roastBatch.key]: progress };
@@ -210,7 +214,7 @@ export default function OperationsPanel({
       }
       return next;
     });
-    setRoastBatch((current) => current ? { ...current, startedAt } : current);
+    setRoastBatch((current) => current ? { ...current, startedAt, machine } : current);
     return startedAt;
   }
 
@@ -351,12 +355,16 @@ function RoastingBoard({
     return [...map.values()];
   }, [data.active_orders]);
   const waiting = data.active_orders.filter((order) => order.status === 'waiting').length;
-  const roasting = data.active_orders.filter((order) => order.status === 'roasting').length;
+  const currentRoasting = groups.find((orders) => orders[0].status === 'roasting');
+  const currentRoastingKey = currentRoasting?.map((order) => order.id).join('-');
+  const visibleGroups = groups.filter((orders) =>
+    orders[0].status === 'waiting' || orders.map((order) => order.id).join('-') === currentRoastingKey,
+  );
   return (
     <>
       <div className="operation-stats">
         <div className="operation-stat"><span><Boxes />等待安排</span><strong>{waiting}</strong><small>张订单</small></div>
-        <div className="operation-stat accent"><span><Flame />正在烘焙</span><strong>{roasting}</strong><small>张订单</small></div>
+        <div className="operation-stat accent"><span><Flame />正在烘焙</span><strong>{currentRoasting ? 1 : 0}</strong><small>{currentRoasting ? '台机器' : '台机器'}</small></div>
         <div className="operation-stat"><span><Scale />今日待处理</span><strong>{kg(data.active_orders.reduce((sum, order) => sum + order.quantity_grams, 0))}</strong><small>订单总重量</small></div>
       </div>
       <section className="panel">
@@ -371,7 +379,7 @@ function RoastingBoard({
           <div className="operation-empty"><CheckCheck size={40} /><h2>今天的烘焙已经安排完了</h2><p>新订单会自动出现在这里。</p></div>
         ) : mode === 'bean' ? (
           <div className="roast-groups">
-            {groups.map((orders) => {
+            {visibleGroups.map((orders) => {
               const first = orders[0];
               const sku = catalog.skus.find((item) => item.id === first.sku_id);
               const total = orders.reduce((sum, order) => sum + order.quantity_grams, 0);
@@ -388,21 +396,21 @@ function RoastingBoard({
                     <div className="customer-chips">{orders.map((order) => <span key={order.id}>{order.customer_name} {kg(order.quantity_grams)}</span>)}</div>
                   </div>
                   <div className="group-total">
-                    {first.status === 'waiting' ? <><small>合并重量</small><strong>{kg(total)}</strong><span>计划 {orders.reduce((sum, order) => sum + order.batch_count, 0)} 仓</span></> : progress ? <><small>已记录烘焙</small><strong>{kg(progress.chargedGrams)}</strong><span>{extra ? `成品余量 ${kg(extra)}` : remaining ? `还差 ${kg(remaining)}` : '刚好完成订单重量'}</span></> : <><small>订单目标</small><strong>{kg(total)}</strong><span>等待录入本锅克重</span></>}
+                    {first.status === 'waiting' ? <><small>合并重量</small><strong>{kg(total)}</strong><span>计划 {orders.reduce((sum, order) => sum + order.batch_count, 0)} 仓</span></> : progress ? <><small>已记录烘焙</small><strong>{kg(progress.chargedGrams)}</strong><span>{progress.machine} · {extra ? `成品余量 ${kg(extra)}` : remaining ? `还差 ${kg(remaining)}` : '刚好完成订单重量'}</span></> : <><small>订单目标</small><strong>{kg(total)}</strong><span>等待录入本锅克重</span></>}
                   </div>
-                  {first.status === 'waiting' ? <Button className="primary-action" disabled={busy} onClick={() => startBatch(orders)}><Flame />开始这一批</Button> : <span className="roasting-state"><Flame />烘焙中</span>}
+                  {first.status === 'waiting' ? <Button className="primary-action" disabled={busy || !!currentRoasting} onClick={() => startBatch(orders)}><Flame />{currentRoasting ? '等待当前烘焙' : '开始这一批'}</Button> : <span className="roasting-state"><Flame />Sandouke 600 · 烘焙中</span>}
                 </article>
               );
             })}
           </div>
         ) : (
           <div className="customer-order-list">
-            {data.active_orders.map((order) => (
+            {data.active_orders.filter((order) => order.status === 'waiting' || currentRoasting?.some((active) => active.id === order.id)).map((order) => (
               <article key={order.id}>
                 <div><strong>{order.customer_name}</strong><span>{order.code}</span></div>
                 <div><strong>{order.bean_name}</strong><span>{skuName(catalog.skus.find((item) => item.id === order.sku_id), order)}</span></div>
                 <strong>{kg(order.quantity_grams)}</strong>
-                {order.status === 'waiting' ? <Button variant="outline" disabled={busy} onClick={() => startBatch([order])}>开始烘焙<ArrowRight /></Button> : <span className="roasting-state"><Flame />烘焙中</span>}
+                {order.status === 'waiting' ? <Button variant="outline" disabled={busy || !!currentRoasting} onClick={() => startBatch([order])}>{currentRoasting ? '等待当前烘焙' : '开始烘焙'}<ArrowRight /></Button> : <span className="roasting-state"><Flame />Sandouke 600 · 烘焙中</span>}
               </article>
             ))}
           </div>
@@ -420,7 +428,7 @@ function RoastConsole({
 }: {
   batch: RoastBatch;
   busy: boolean;
-  begin: (chargedGrams: number) => Promise<number | null>;
+  begin: (chargedGrams: number, machine: string) => Promise<number | null>;
   finish: () => Promise<void>;
 }) {
   const profile = batch.orders[0].profile_snapshot;
@@ -430,9 +438,10 @@ function RoastConsole({
   const [stageRecordOpen, setStageRecordOpen] = useState(false);
   const [chargeTemperature, setChargeTemperature] = useState('');
   const [chargeWeight, setChargeWeight] = useState('');
+  const [machine, setMachine] = useState(batch.machine);
   const [targetTemperature, setTargetTemperature] = useState(() => String(profile.points.at(-1)?.temperature || ''));
   const [targetExit, setTargetExit] = useState(() => defaultRoastTarget(profile.roast_level));
-  const [confirmedTarget, setConfirmedTarget] = useState<{ temperature: string; label: string; level: string } | null>(null);
+  const [confirmedTarget, setConfirmedTarget] = useState<{ temperature: string; label: string; level: string; machine: string } | null>(null);
   const [temperature, setTemperature] = useState('');
   const [typingStartedAt, setTypingStartedAt] = useState<number | null>(null);
   const [stageTemperature, setStageTemperature] = useState('');
@@ -525,13 +534,13 @@ function RoastConsole({
     const inputWeight = Number(chargeWeight);
     if (!Number.isFinite(inputTemperature) || inputTemperature < 0 || inputTemperature > 350) return;
     if (!Number.isFinite(inputWeight) || inputWeight <= 0 || inputWeight > 100000) return;
-    const startedAt = await begin(inputWeight);
+    const startedAt = await begin(inputWeight, machine);
     if (!startedAt) return;
     setNow(startedAt);
     setRecords([{ stage: '入豆', seconds: 0, temperature: inputTemperature }]);
     setSelectedStage('回温');
     const target = roastTargets.find((item) => item.value === targetExit) || roastTargets[1];
-    setConfirmedTarget({ temperature: targetTemperature, label: target.label, level: target.level });
+    setConfirmedTarget({ temperature: targetTemperature, label: target.label, level: target.level, machine });
     setChargeSetupOpen(false);
   }
 
@@ -546,7 +555,7 @@ function RoastConsole({
             <DialogDescription>
               {profile.name} · {batch.orders.length} 张订单合并烘焙
             </DialogDescription>
-            {confirmedTarget && <span className="confirmed-target">目标 {confirmedTarget.temperature} ℃ · {confirmedTarget.label} · {confirmedTarget.level}</span>}
+            {confirmedTarget && <span className="confirmed-target">{confirmedTarget.machine} · 目标 {confirmedTarget.temperature} ℃ · {confirmedTarget.label} · {confirmedTarget.level}</span>}
           </div>
           <div className="roast-clock"><TimerReset size={17} /><strong>{started ? formatSeconds(elapsed) : '待开始'}</strong><span>{started ? '本锅时间' : '填写入豆资料后开始'}</span></div>
         </div>
@@ -613,6 +622,7 @@ function RoastConsole({
           </DialogHeader>
           <form className="charge-form" onSubmit={(event) => { event.preventDefault(); void beginRecording(); }}>
             <div className="charge-bean">本锅豆子<strong>{batch.orders[0].bean_name}</strong></div>
+            <label htmlFor="roast-machine">烘焙机<NativeSelect id="roast-machine" value={machine} onChange={(event) => setMachine(event.target.value)}><option value="Sandouke 600">Sandouke 600</option></NativeSelect></label>
             <label htmlFor="charge-temperature">入豆温度（℃）<Input id="charge-temperature" value={chargeTemperature} onChange={(event) => setChargeTemperature(event.target.value)} inputMode="numeric" type="number" min="0" max="350" required placeholder="例如 185" /></label>
             <label htmlFor="charge-weight">入豆克重（g）<Input id="charge-weight" value={chargeWeight} onChange={(event) => setChargeWeight(event.target.value)} inputMode="numeric" type="number" min="1" max="100000" required placeholder="例如 1000" /></label>
             <label htmlFor="target-temperature">目标出豆温度（℃）<Input id="target-temperature" value={targetTemperature} onChange={(event) => setTargetTemperature(event.target.value)} inputMode="numeric" type="number" min="0" max="350" required placeholder="例如 190" /></label>

@@ -417,6 +417,21 @@ export async function PATCH(request: Request) {
       const target = text(b.status, '订单状态', 20, true);
       if (!['roasting', 'completed'].includes(target)) throw new InputError('订单状态无效。');
       const ids = b.ids.map((value) => text(value, '订单', 80, true));
+      if (target === 'roasting') {
+        const other = await db
+          .prepare(
+            'SELECT code FROM orders WHERE status=? AND id NOT IN (' +
+              ids.map(() => '?').join(',') +
+              ') LIMIT 1',
+          )
+          .bind('roasting', ...ids)
+          .first<{ code: string }>();
+        if (other)
+          throw new InputError(
+            `Sandouke 600 正在烘焙 ${other.code}，请结束当前这一锅后再开始下一锅。`,
+            409,
+          );
+      }
       const expected = target === 'roasting' ? 'waiting' : 'roasting';
       const timestamp = target === 'roasting' ? 'started_at' : 'completed_at';
       const statements = ids.flatMap((orderId) => {
@@ -495,6 +510,17 @@ export async function PATCH(request: Request) {
       .bind(id)
       .first<{ status: string }>();
     if (!current) throw new InputError('订单不存在。', 404);
+    if (target === 'roasting') {
+      const other = await db
+        .prepare('SELECT code FROM orders WHERE status=? AND id<>? LIMIT 1')
+        .bind('roasting', id)
+        .first<{ code: string }>();
+      if (other)
+        throw new InputError(
+          `Sandouke 600 正在烘焙 ${other.code}，请结束当前这一锅后再开始下一锅。`,
+          409,
+        );
+    }
     if (current.status === target) return json({ id });
     nextStatus(current.status, target);
     const transitionId = crypto.randomUUID();
