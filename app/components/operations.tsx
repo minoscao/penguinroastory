@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, type SyntheticEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type SyntheticEvent } from 'react';
 import Link from 'next/link';
 import {
   ArrowRight,
@@ -36,6 +36,7 @@ import { CartesianGrid, Line, LineChart, Tooltip, XAxis, YAxis } from 'recharts'
 import type {
   BeanSku,
   Catalog,
+  Profile,
   RoastOrder,
   Shipment,
   StockMovement,
@@ -46,6 +47,7 @@ type RoastBatch = {
   orders: RoastOrder[];
   startedAt: number | null;
   machine: string;
+  session?: RoastSession;
 };
 
 type RecordedPoint = {
@@ -59,6 +61,22 @@ type RoastProgress = {
   chargedGrams: number;
   targetGrams: number;
   machine: string;
+};
+
+type ConfirmedTarget = {
+  temperature: string;
+  label: string;
+  level: string;
+  machine: string;
+  profileId?: string;
+  profileName?: string;
+};
+
+type RoastSession = {
+  startedAt: number;
+  machine: string;
+  records: RecordedPoint[];
+  target: ConfirmedTarget;
 };
 
 const roastTargets = [
@@ -115,7 +133,7 @@ function time(value?: string | null) {
 }
 
 function skuName(sku: BeanSku | undefined, order?: RoastOrder) {
-  return sku?.label || order?.sku_snapshot?.label || '旧订单 · 规格待补充';
+  return sku?.label || order?.sku_snapshot?.label || '旧订单 · 批次待补充';
 }
 
 export default function OperationsPanel({
@@ -132,6 +150,7 @@ export default function OperationsPanel({
   const [roastMode, setRoastMode] = useState<'bean' | 'customer'>('bean');
   const [roastBatch, setRoastBatch] = useState<RoastBatch | null>(null);
   const [roastProgress, setRoastProgress] = useState<Record<string, RoastProgress>>({});
+  const [roastSessions, setRoastSessions] = useState<Record<string, RoastSession>>({});
   const [shipmentOrder, setShipmentOrder] = useState<RoastOrder | 'sample' | null>(null);
   const [inventorySku, setInventorySku] = useState<BeanSku | null>(null);
 
@@ -156,6 +175,8 @@ export default function OperationsPanel({
       try {
         const stored = window.localStorage.getItem('penguin-roast-progress');
         if (stored) setRoastProgress(JSON.parse(stored) as Record<string, RoastProgress>);
+        const sessions = window.localStorage.getItem('penguin-roast-sessions');
+        if (sessions) setRoastSessions(JSON.parse(sessions) as Record<string, RoastSession>);
       } catch {
         // The roasting screen remains usable if this browser cannot save local progress.
       }
@@ -192,7 +213,31 @@ export default function OperationsPanel({
     });
   }
 
-  async function beginBatch(chargedGrams: number, machine: string) {
+  function resumeBatch(orders: RoastOrder[]) {
+    const key = orders.map((order) => order.id).join('-');
+    const session = roastSessions[key];
+    setRoastBatch({
+      key,
+      orders,
+      startedAt: session?.startedAt || Date.now(),
+      machine: session?.machine || roastProgress[key]?.machine || 'Sandouke 600',
+      session,
+    });
+  }
+
+  const saveSession = useCallback((key: string, session: RoastSession) => {
+    setRoastSessions((current) => {
+      const next = { ...current, [key]: session };
+      try {
+        window.localStorage.setItem('penguin-roast-sessions', JSON.stringify(next));
+      } catch {
+        // The live batch still stays open even if browser storage is unavailable.
+      }
+      return next;
+    });
+  }, []);
+
+  async function beginBatch(chargedGrams: number, machine: string, draft: Omit<RoastSession, 'startedAt' | 'machine'>) {
     if (!roastBatch) return null;
     const startedAt = Date.now();
     const ok = await mutate(
@@ -214,7 +259,9 @@ export default function OperationsPanel({
       }
       return next;
     });
-    setRoastBatch((current) => current ? { ...current, startedAt, machine } : current);
+    const session = { ...draft, startedAt, machine };
+    saveSession(roastBatch.key, session);
+    setRoastBatch((current) => current ? { ...current, startedAt, machine, session } : current);
     return startedAt;
   }
 
@@ -256,6 +303,7 @@ export default function OperationsPanel({
           setMode={setRoastMode}
           busy={busy}
           startBatch={startBatch}
+          resumeBatch={resumeBatch}
           roastProgress={roastProgress}
         />
       )}
@@ -321,6 +369,8 @@ export default function OperationsPanel({
               busy={busy}
               begin={beginBatch}
               finish={finishBatch}
+              saveSession={saveSession}
+              profiles={catalog.profiles.filter((profile) => profile.bean_id === roastBatch.orders[0].bean_id && !profile.id.startsWith('pending-profile-'))}
             />
           )}
         </DialogContent>
@@ -336,6 +386,7 @@ function RoastingBoard({
   setMode,
   busy,
   startBatch,
+  resumeBatch,
   roastProgress,
 }: {
   data: OperationsData;
@@ -344,12 +395,13 @@ function RoastingBoard({
   setMode: (mode: 'bean' | 'customer') => void;
   busy: boolean;
   startBatch: (orders: RoastOrder[]) => Promise<void>;
+  resumeBatch: (orders: RoastOrder[]) => void;
   roastProgress: Record<string, RoastProgress>;
 }) {
   const groups = useMemo(() => {
     const map = new Map<string, RoastOrder[]>();
     for (const order of data.active_orders) {
-      const key = [order.status, order.sku_id || order.bean_id, order.profile_id].join('|');
+      const key = [order.status, order.sku_id || order.bean_id].join('|');
       map.set(key, [...(map.get(key) || []), order]);
     }
     return [...map.values()];
@@ -369,7 +421,7 @@ function RoastingBoard({
       </div>
       <section className="panel">
         <div className="panel-heading operation-heading">
-          <div><h2>烘焙安排</h2><p>相同豆子规格与相同曲线会自动放在一起。</p></div>
+          <div><h2>烘焙安排</h2><p>相同豆子批次会自动放在一起；本锅烘焙方案在开始时决定。</p></div>
           <div className="view-switch" aria-label="查看方式">
             <button className={mode === 'bean' ? 'active' : ''} onClick={() => setMode('bean')}>按豆子合并</button>
             <button className={mode === 'customer' ? 'active' : ''} onClick={() => setMode('customer')}>按客户查看</button>
@@ -388,17 +440,17 @@ function RoastingBoard({
               const remaining = Math.max(0, total - (progress?.chargedGrams || 0));
               const extra = Math.max(0, (progress?.chargedGrams || 0) - total);
               return (
-                <article className="roast-group" key={[first.status, first.sku_id, first.profile_id].join('-')}>
+                <article className="roast-group" key={[first.status, first.sku_id || first.bean_id].join('-')}>
                   <div className={'group-icon ' + first.status}>{first.status === 'waiting' ? <Boxes /> : <Flame />}</div>
                   <div className="group-main">
                     <div className="group-title"><strong>{first.bean_name}</strong><span>{skuName(sku, first)}</span></div>
-                    <p>{first.profile_snapshot.name} · {first.profile_snapshot.roast_level} · {orders.length} 位客户</p>
+                    <p>{first.status === 'waiting' ? '开始本锅时选择烘焙方案' : '本锅烘焙进行中'} · {orders.length} 位客户</p>
                     <div className="customer-chips">{orders.map((order) => <span key={order.id}>{order.customer_name} {kg(order.quantity_grams)}</span>)}</div>
                   </div>
                   <div className="group-total">
                     {first.status === 'waiting' ? <><small>合并重量</small><strong>{kg(total)}</strong><span>计划 {orders.reduce((sum, order) => sum + order.batch_count, 0)} 仓</span></> : progress ? <><small>已记录烘焙</small><strong>{kg(progress.chargedGrams)}</strong><span>{progress.machine} · {extra ? `成品余量 ${kg(extra)}` : remaining ? `还差 ${kg(remaining)}` : '刚好完成订单重量'}</span></> : <><small>订单目标</small><strong>{kg(total)}</strong><span>等待录入本锅克重</span></>}
                   </div>
-                  {first.status === 'waiting' ? <Button className="primary-action" disabled={busy || !!currentRoasting} onClick={() => startBatch(orders)}><Flame />{currentRoasting ? '等待当前烘焙' : '开始这一批'}</Button> : <span className="roasting-state"><Flame />Sandouke 600 · 烘焙中</span>}
+                  {first.status === 'waiting' ? <Button className="primary-action" disabled={busy || !!currentRoasting} onClick={() => startBatch(orders)}><Flame />{currentRoasting ? '等待当前烘焙' : '开始这一批'}</Button> : <button className="roasting-state" onClick={() => resumeBatch(orders)}><Flame />{progress?.machine || 'Sandouke 600'} · 烘焙中<ArrowRight /></button>}
                 </article>
               );
             })}
@@ -410,7 +462,7 @@ function RoastingBoard({
                 <div><strong>{order.customer_name}</strong><span>{order.code}</span></div>
                 <div><strong>{order.bean_name}</strong><span>{skuName(catalog.skus.find((item) => item.id === order.sku_id), order)}</span></div>
                 <strong>{kg(order.quantity_grams)}</strong>
-                {order.status === 'waiting' ? <Button variant="outline" disabled={busy || !!currentRoasting} onClick={() => startBatch([order])}>{currentRoasting ? '等待当前烘焙' : '开始烘焙'}<ArrowRight /></Button> : <span className="roasting-state"><Flame />Sandouke 600 · 烘焙中</span>}
+                {order.status === 'waiting' ? <Button variant="outline" disabled={busy || !!currentRoasting} onClick={() => startBatch([order])}>{currentRoasting ? '等待当前烘焙' : '开始烘焙'}<ArrowRight /></Button> : <button className="roasting-state" onClick={() => resumeBatch([order])}><Flame />{roastProgress[order.id]?.machine || 'Sandouke 600'} · 烘焙中<ArrowRight /></button>}
               </article>
             ))}
           </div>
@@ -425,13 +477,19 @@ function RoastConsole({
   busy,
   begin,
   finish,
+  saveSession,
+  profiles,
 }: {
   batch: RoastBatch;
   busy: boolean;
-  begin: (chargedGrams: number, machine: string) => Promise<number | null>;
+  begin: (chargedGrams: number, machine: string, draft: Omit<RoastSession, 'startedAt' | 'machine'>) => Promise<number | null>;
   finish: () => Promise<void>;
+  saveSession: (key: string, session: RoastSession) => void;
+  profiles: Profile[];
 }) {
-  const profile = batch.orders[0].profile_snapshot;
+  const fallbackProfile = batch.orders[0].profile_snapshot;
+  const [profileId, setProfileId] = useState(() => batch.session?.target.profileId || profiles[0]?.id || '');
+  const profile = profiles.find((item) => item.id === profileId) || fallbackProfile;
   const [now, setNow] = useState(() => Date.now());
   const [selectedStage, setSelectedStage] = useState('');
   const [chargeSetupOpen, setChargeSetupOpen] = useState(false);
@@ -439,22 +497,34 @@ function RoastConsole({
   const [chargeTemperature, setChargeTemperature] = useState('');
   const [chargeWeight, setChargeWeight] = useState('');
   const [machine, setMachine] = useState(batch.machine);
-  const [targetTemperature, setTargetTemperature] = useState(() => String(profile.points.at(-1)?.temperature || ''));
+  const [targetTemperature, setTargetTemperature] = useState(() => batch.session?.target.temperature || String(profile.points.at(-1)?.temperature || ''));
   const [targetExit, setTargetExit] = useState(() => defaultRoastTarget(profile.roast_level));
-  const [confirmedTarget, setConfirmedTarget] = useState<{ temperature: string; label: string; level: string; machine: string } | null>(null);
+  const [confirmedTarget, setConfirmedTarget] = useState<ConfirmedTarget | null>(() => batch.session?.target || null);
   const [temperature, setTemperature] = useState('');
   const [typingStartedAt, setTypingStartedAt] = useState<number | null>(null);
   const [stageTemperature, setStageTemperature] = useState('');
   const [stageTypingStartedAt, setStageTypingStartedAt] = useState<number | null>(null);
   const [stageFan, setStageFan] = useState<number | null>(null);
-  const [records, setRecords] = useState<RecordedPoint[]>([]);
+  const [records, setRecords] = useState<RecordedPoint[]>(() => batch.session?.records || []);
+  const startedAt = batch.startedAt;
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 250);
     return () => window.clearInterval(timer);
   }, []);
 
-  const startedAt = batch.startedAt;
+  useEffect(() => {
+    if (!startedAt || !confirmedTarget) return;
+    queueMicrotask(() => {
+      saveSession(batch.key, {
+        startedAt,
+        machine: confirmedTarget.machine,
+        records,
+        target: confirmedTarget,
+      });
+    });
+  }, [batch.key, confirmedTarget, records, saveSession, startedAt]);
+
   const started = startedAt !== null;
   const elapsed = startedAt === null ? 0 : Math.max(0, Math.floor((now - startedAt) / 1000));
   const recordAt = Math.max(
@@ -534,13 +604,15 @@ function RoastConsole({
     const inputWeight = Number(chargeWeight);
     if (!Number.isFinite(inputTemperature) || inputTemperature < 0 || inputTemperature > 350) return;
     if (!Number.isFinite(inputWeight) || inputWeight <= 0 || inputWeight > 100000) return;
-    const startedAt = await begin(inputWeight, machine);
+    const target = roastTargets.find((item) => item.value === targetExit) || roastTargets[1];
+    const confirmed = { temperature: targetTemperature, label: target.label, level: target.level, machine, profileId, profileName: profile.name };
+    const initialRecords = [{ stage: '入豆', seconds: 0, temperature: inputTemperature }];
+    const startedAt = await begin(inputWeight, machine, { records: initialRecords, target: confirmed });
     if (!startedAt) return;
     setNow(startedAt);
-    setRecords([{ stage: '入豆', seconds: 0, temperature: inputTemperature }]);
+    setRecords(initialRecords);
     setSelectedStage('回温');
-    const target = roastTargets.find((item) => item.value === targetExit) || roastTargets[1];
-    setConfirmedTarget({ temperature: targetTemperature, label: target.label, level: target.level, machine });
+    setConfirmedTarget(confirmed);
     setChargeSetupOpen(false);
   }
 
@@ -553,7 +625,7 @@ function RoastConsole({
             <p>LIVE ROAST CONSOLE</p>
             <DialogTitle>{batch.orders[0].bean_name} · 本锅烘焙</DialogTitle>
             <DialogDescription>
-              {profile.name} · {batch.orders.length} 张订单合并烘焙
+              {confirmedTarget?.profileName || profile.name} · {batch.orders.length} 张订单合并烘焙
             </DialogDescription>
             {confirmedTarget && <span className="confirmed-target">{confirmedTarget.machine} · 目标 {confirmedTarget.temperature} ℃ · {confirmedTarget.label} · {confirmedTarget.level}</span>}
           </div>
@@ -622,6 +694,7 @@ function RoastConsole({
           </DialogHeader>
           <form className="charge-form" onSubmit={(event) => { event.preventDefault(); void beginRecording(); }}>
             <div className="charge-bean">本锅豆子<strong>{batch.orders[0].bean_name}</strong></div>
+            <label htmlFor="roast-profile">本锅烘焙方案<NativeSelect id="roast-profile" value={profileId} onChange={(event) => { const next = event.target.value; setProfileId(next); const selected = profiles.find((item) => item.id === next); if (selected?.points.at(-1)?.temperature) setTargetTemperature(String(selected.points.at(-1)?.temperature)); if (selected) setTargetExit(defaultRoastTarget(selected.roast_level)); }}><option value="">临时方案（不套用已有曲线）</option>{profiles.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.roast_level}</option>)}</NativeSelect></label>
             <label htmlFor="roast-machine">烘焙机<NativeSelect id="roast-machine" value={machine} onChange={(event) => setMachine(event.target.value)}><option value="Sandouke 600">Sandouke 600</option></NativeSelect></label>
             <label htmlFor="charge-temperature">入豆温度（℃）<Input id="charge-temperature" value={chargeTemperature} onChange={(event) => setChargeTemperature(event.target.value)} inputMode="numeric" type="number" min="0" max="350" required placeholder="例如 185" /></label>
             <label htmlFor="charge-weight">入豆克重（g）<Input id="charge-weight" value={chargeWeight} onChange={(event) => setChargeWeight(event.target.value)} inputMode="numeric" type="number" min="1" max="100000" required placeholder="例如 1000" /></label>
@@ -639,12 +712,18 @@ function RoastConsole({
             <DialogDescription>填写此刻豆温，并直接点选风门档位。记录时间从输入温度的第一个数字开始计算。</DialogDescription>
           </DialogHeader>
           <form className="stage-record-form" onSubmit={(event) => { event.preventDefault(); recordStage(); }}>
-            <label htmlFor="stage-temperature">当前豆温（℃）<Input id="stage-temperature" value={stageTemperature} onChange={(event) => { if (!stageTypingStartedAt && event.target.value) setStageTypingStartedAt(now); setStageTemperature(event.target.value); }} inputMode="numeric" type="number" min="0" max="350" required placeholder="例如 185" /></label>
-            <fieldset className="fan-picker">
-              <legend>风门（1–10）</legend>
-              <div>{Array.from({ length: 10 }, (_, index) => index + 1).map((fan) => <button className={stageFan === fan ? 'active' : ''} type="button" key={fan} onClick={() => setStageFan(fan)}>{fan}</button>)}</div>
-            </fieldset>
-            <Button className="stage-save" type="submit" disabled={!stageTemperature || !stageFan}><Thermometer />记录阶段</Button>
+            <div className="stage-touch-grid">
+              <section className="stage-keypad" aria-label="触摸输入当前豆温">
+                <span>当前豆温（℃）</span>
+                <strong>{stageTemperature || '—'}<small>℃</small></strong>
+                <div>{['1','2','3','4','5','6','7','8','9','0'].map((digit) => <button type="button" key={digit} onClick={() => { if (!stageTypingStartedAt) setStageTypingStartedAt(now); setStageTemperature((value) => value.length >= 3 ? value : value + digit); }}>{digit}</button>)}<button className="erase" type="button" onClick={() => setStageTemperature((value) => { const next = value.slice(0, -1); if (!next) setStageTypingStartedAt(null); return next; })}><Delete size={20} /></button></div>
+              </section>
+              <fieldset className="fan-picker">
+                <legend>风门（1–10）</legend>
+                <div>{Array.from({ length: 10 }, (_, index) => index + 1).map((fan) => <button className={stageFan === fan ? 'active' : ''} type="button" key={fan} onClick={() => setStageFan(fan)}>{fan}</button>)}</div>
+              </fieldset>
+            </div>
+            <Button className="stage-save" type="submit" disabled={!stageTemperature || !stageFan}><Thermometer />记录 {stageTemperature || '温度'} ℃ · 风门 {stageFan || '—'}</Button>
           </form>
         </DialogContent>
       </Dialog>
@@ -707,12 +786,12 @@ function AdminBoard({ data, catalog, openInventory }: { data: OperationsData; ca
   return (
     <>
       <div className="admin-overview">
-        <div className="admin-summary"><span>当前生豆库存</span><strong>{kg(totalStock)}</strong><p>{catalog.skus.length} 个豆子规格分别管理</p></div>
-        <div className="admin-summary"><span>进行中订单已扣减</span><strong>{kg(activeWeight)}</strong><p>创建订单时自动从对应规格扣除</p></div>
+        <div className="admin-summary"><span>当前生豆库存</span><strong>{kg(totalStock)}</strong><p>{catalog.skus.length} 个豆子批次分别管理</p></div>
+        <div className="admin-summary"><span>进行中订单已扣减</span><strong>{kg(activeWeight)}</strong><p>创建订单时自动从可用批次扣除</p></div>
         <div className="admin-quick"><h2>快速查看</h2><Link href="/"><ClipboardList />全部订单<ArrowRight /></Link><Link href="/customers"><Users />客户档案<ArrowRight /></Link><Link href="/beans"><Boxes />产品与曲线<ArrowRight /></Link></div>
       </div>
       <section className="panel inventory-panel">
-        <div className="panel-heading operation-heading"><div><h2>库存与豆子规格</h2><p>年份、处理法、海拔或批次不同，就分别计算库存。</p></div></div>
+        <div className="panel-heading operation-heading"><div><h2>库存与豆子批次</h2><p>年份、处理法、海拔或批次不同，就分别计算库存。</p></div></div>
         <div className="inventory-grid">
           {catalog.skus.map((sku) => {
             const bean = catalog.beans.find((item) => item.id === sku.bean_id);

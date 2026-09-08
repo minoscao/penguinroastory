@@ -943,15 +943,10 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                         <div className="sku-preview">
                           <div>
                             <strong>
-                              {catalog.skus.filter((sku) => sku.bean_id === b.id).length} 个规格
-                            </strong>
-                            <span>
                               库存 {weight(catalog.skus.filter((sku) => sku.bean_id === b.id).reduce((sum, sku) => sum + sku.stock_grams, 0))}
-                            </span>
+                            </strong>
+                            <span>库存按批次在库存管理中维护</span>
                           </div>
-                          <Button variant="outline" size="sm" onClick={() => open({ type: 'sku', bean: b })}>
-                            <Plus size={14} />新增规格
-                          </Button>
                         </div>
                         <div className="card-bottom">
                           <span>
@@ -1173,7 +1168,7 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                     ? '编辑豆子'
                     : '新增豆子'
                   : modal?.type === 'sku'
-                    ? modal.bean.name + ' · 新增规格'
+                    ? modal.bean.name + ' · 新增批次'
                   : modal?.type === 'profiles'
                     ? modal.bean.name + ' · 烘焙方案'
                     : modal?.type === 'profile'
@@ -1188,7 +1183,7 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
               {modal?.type === 'order'
                 ? '选好客户、豆子和方案，安排这次烘焙。'
                 : modal?.type === 'sku'
-                  ? '年份、处理法、海拔或批次不同，请分别建立规格。'
+                  ? '为这款豆子登记到货批次和入库重量。'
                   : modal?.type === 'profile'
                   ? '记录你自己的目标参数。保存方案不会更改历史订单。'
                   : modal?.type === 'profiles'
@@ -1310,13 +1305,13 @@ function SkuForm({
         bean_id: bean.id,
         stock_grams: Math.round(Number(data.stock_kg || 0) * 1000),
       },
-      '豆子规格和初始库存已保存',
+      '豆子批次和初始库存已保存',
     );
   }
   return (
     <form onSubmit={submit}>
       <fieldset disabled={busy} className="form-grid">
-        <Field label="规格名称 *" wide>
+        <Field label="批次名称 *" wide>
           <Input name="label" required maxLength={100} placeholder="例如：2026 水洗批次" />
         </Field>
         <Field label="年份">
@@ -1334,11 +1329,11 @@ function SkuForm({
         <Field label="初始库存（kg）*" wide>
           <Input name="stock_kg" type="number" required min="0" max="100000" step="0.001" defaultValue="0" />
         </Field>
-        <p className="hint field-wide">保存以后，这个规格会出现在新建订单和库存管理中。</p>
+        <p className="hint field-wide">保存以后，这个批次会进入库存管理；新订单会自动从可用批次扣减。</p>
         <div className="form-actions field-wide">
           <span>库存以生豆重量记录</span>
           <Button type="submit" className="primary-action">
-            {busy ? '正在保存…' : '保存规格'}
+            {busy ? '正在保存…' : '保存批次'}
             <Check size={16} />
           </Button>
         </div>
@@ -1733,17 +1728,13 @@ function OrderForm({
 }) {
   const [beanId, setBeanId] = useState(''),
     [customerId, setCustomerId] = useState(''),
-    [profileId, setProfileId] = useState(''),
-    [skuId, setSkuId] = useState(''),
     [customerQuery, setCustomerQuery] = useState(''),
     [requestId] = useState(() => crypto.randomUUID());
-  const profiles = catalog.profiles.filter((p) => p.bean_id === beanId);
   const skus = catalog.skus.filter((s) => s.bean_id === beanId);
   const customers = catalog.customers.filter((c) =>
     (c.name + c.contact + c.phone).toLowerCase().includes(customerQuery.toLowerCase()),
   );
-  const selected = profiles.find((p) => p.id === profileId);
-  const selectedSku = skus.find((s) => s.id === skuId);
+  const availableStock = skus.reduce((sum, sku) => sum + sku.stock_grams, 0);
   async function submit(e: SyntheticEvent<HTMLFormElement>) {
     e.preventDefault();
     const data = Object.fromEntries(new FormData(e.currentTarget));
@@ -1754,10 +1745,8 @@ function OrderForm({
         kind: 'order',
         id: requestId,
         bean_id: beanId,
-        sku_id: skuId,
-        profile_id: profileId,
         quantity_grams: Math.round(Number(data.quantity_kg) * 1000),
-        batch_count: Number(data.batch_count),
+        batch_count: 1,
       },
       '订单已创建，正在等待烘焙',
     );
@@ -1812,8 +1801,6 @@ function OrderForm({
             required
             onChange={(e) => {
               setBeanId(e.target.value);
-              setProfileId('');
-              setSkuId('');
             }}
           >
             <option value="" disabled>
@@ -1827,92 +1814,15 @@ function OrderForm({
             ))}
           </NativeSelect>
         </Field>
-        <Field label="豆子规格（SKU）*" wide>
-          <NativeSelect
-            value={skuId}
-            required
-            disabled={!beanId}
-            onChange={(e) => setSkuId(e.target.value)}
-          >
-            <option value="" disabled>
-              {beanId ? '选择年份、处理法与批次' : '请先选择豆子'}
-            </option>
-            {skus.map((sku) => (
-              <option key={sku.id} value={sku.id}>
-                {sku.label} · 可用 {weight(sku.stock_grams)}
-              </option>
-            ))}
-          </NativeSelect>
-        </Field>
-        {beanId && !skus.length && (
-          <div className="setup-notice field-wide">
-            这款豆子还没有具体规格，暂时不能建立订单。
-            <Button type="button" variant="outline" size="sm" onClick={() => open({ type: 'sku', bean: catalog.beans.find((b) => b.id === beanId)! })}>
-              <Plus />先添加规格
-            </Button>
-          </div>
-        )}
-        <Field label="烘焙方案 *" wide>
-          <NativeSelect
-            value={profileId}
-            required
-            disabled={!beanId}
-            onChange={(e) => setProfileId(e.target.value)}
-          >
-            <option value="" disabled>
-              {beanId ? '选择已保存的烘焙方案' : '请先选择豆子'}
-            </option>
-            {profiles.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name} · {p.roast_level}
-              </option>
-            ))}
-          </NativeSelect>
-        </Field>
-        {beanId && !profiles.length && (
-          <div className="setup-notice field-wide">
-            这款豆子还没有烘焙方案。
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                open({
-                  type: 'profile',
-                  bean: catalog.beans.find((b) => b.id === beanId)!,
-                })
-              }
-            >
-              <Plus />
-              先添加方案
-            </Button>
-            <small>保存后重新打开新建订单。</small>
-          </div>
-        )}
         {!!(
           catalog.customers.find((c) => c.id === customerId)?.is_demo ||
           catalog.beans.find((b) => b.id === beanId)?.is_demo ||
-          selected?.is_demo
+          false
         ) && (
           <p className="demo-form-note field-wide">
             <Sparkles size={17} />
             你选用了模拟资料，这张订单也会标为模拟。示例曲线仅供体验，请勿直接用于实际烘焙。
           </p>
-        )}
-        {selected && (
-          <div className="selected-profile field-wide">
-            <div>
-              <SlidersHorizontal size={16} />
-              <strong>{selected.name}</strong>
-              <span>v{selected.revision}</span>
-            </div>
-            <p>
-              投豆 {weight(selected.batch_grams)} · 目标{' '}
-              {timeLabel(selected.points.at(-1)?.seconds || 0)} · 下豆{' '}
-              {selected.points.at(-1)?.temperature} ℃
-            </p>
-            <Curve points={selected.points} />
-          </div>
         )}
         <Field label="订单重量（kg）*">
           <Input
@@ -1928,12 +1838,9 @@ function OrderForm({
         <Field label="交付日期">
           <Input name="due_date" type="date" />
         </Field>
-        <Field label="计划烘焙仓数 *">
-          <Input name="batch_count" type="number" required min="1" max="1000" step="1" defaultValue="1" />
-        </Field>
         <div className="inventory-hint">
           <Warehouse size={18} />
-          <span>创建后自动扣减生豆库存<strong>{selectedSku ? `当前可用 ${weight(selectedSku.stock_grams)}` : '请选择豆子规格'}</strong></span>
+          <span>创建后自动从可用批次扣减生豆库存<strong>{beanId ? `当前可用 ${weight(availableStock)}` : '请选择豆子'}</strong></span>
         </div>
         <Field label="订单备注" wide>
           <Textarea
@@ -1943,11 +1850,11 @@ function OrderForm({
           />
         </Field>
         <div className="hint field-wide">
-          目前按订单重量扣减生豆库存；烘焙损耗与熟豆净重换算可以在下一阶段单独设置。
+          下单只记录客户、豆子和订单重量；烘焙方案与合并方式在进入烘焙台后再决定。
         </div>
         <div className="form-actions field-wide">
           <span>创建后为“等待烘焙”</span>
-          <Button type="submit" className="primary-action" disabled={!selected || !selectedSku}>
+          <Button type="submit" className="primary-action" disabled={!customerId || !beanId}>
             {busy ? '正在创建…' : '创建订单'}
             <ArrowRight size={16} />
           </Button>

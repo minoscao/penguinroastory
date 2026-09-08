@@ -99,7 +99,7 @@ export function skuInput(v: unknown) {
   const b = object(v);
   return {
     bean_id: text(b.bean_id, '豆子产品', 80, true),
-    label: text(b.label, '规格名称', 100, true),
+    label: text(b.label, '批次名称', 100, true),
     harvest_year: text(b.harvest_year, '年份', 20),
     process: text(b.process, '处理法', 100),
     altitude_m: number(b.altitude_m || 0, '海拔', 0, 10000, true),
@@ -145,8 +145,8 @@ export function orderInput(v: unknown) {
     id,
     customer_id: text(b.customer_id, '客户', 80, true),
     bean_id: text(b.bean_id, '豆子', 80, true),
-    sku_id: text(b.sku_id, '豆子规格', 80, true),
-    profile_id: text(b.profile_id, '烘焙方案', 80, true),
+    sku_id: text(b.sku_id, '豆子批次', 80),
+    profile_id: text(b.profile_id, '烘焙方案', 80),
     quantity_grams: number(
       b.quantity_grams,
       '订购熟豆重量（克）',
@@ -162,7 +162,7 @@ export function orderInput(v: unknown) {
 export function inventoryInput(v: unknown) {
   const b = object(v);
   return {
-    sku_id: text(b.sku_id, '豆子规格', 80, true),
+    sku_id: text(b.sku_id, '豆子批次', 80, true),
     delta_grams: number(b.delta_grams, '库存变动重量（克）', -100000000, 100000000, true),
     notes: text(b.notes, '库存备注', 500),
   };

@@ -2365,3 +2365,13 @@ h1 { font-size: 35px; font-weight: 600; letter-spacing: -1.3px; }
   .live-curve-chart { height: 210px; }
   .charge-form { grid-template-columns: 1fr; }
 }
+.stage-touch-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(180px, .9fr); gap: 18px; align-items: stretch; }
+.stage-keypad { min-width: 0; padding: 14px; background: #eef3f3; border: 1px solid #d9e3e3; border-radius: 14px; }
+.stage-keypad > span { display: block; color: #52676d; font-size: 12px; font-weight: 700; }
+.stage-keypad > strong { display: block; min-height: 52px; margin: 2px 0 10px; color: #263d44; font-size: 38px; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.stage-keypad > strong small { margin-left: 5px; color: #73858a; font-size: 15px; font-weight: 500; }
+.stage-keypad > div { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+.stage-keypad button { min-height: 43px; color: #2e4248; background: #ffffff; border: 1px solid #d9e3e3; border-radius: 10px; font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.stage-keypad button:hover { background: #e4eded; }
+.stage-keypad .erase { display: grid; place-items: center; }
+@media (max-width: 560px) { .stage-touch-grid { grid-template-columns: 1fr; } }

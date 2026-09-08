@@ -145,6 +145,17 @@ void test('订购重量必须为正整数克', () => {
       }),
     );
 });
+void test('创建订单时只需客户、豆子和重量', () => {
+  const order = orderInput({
+    id: crypto.randomUUID(),
+    customer_id: 'c',
+    bean_id: 'b',
+    quantity_grams: 250,
+    batch_count: 1,
+  });
+  assert.equal(order.sku_id, '');
+  assert.equal(order.profile_id, '');
+});
 void test('库存变动和发货信息必须完整', () => {
   assert.equal(
     inventoryInput({ sku_id: 's', delta_grams: 1500 }).delta_grams,

@@ -256,7 +256,7 @@ export async function POST(request: Request) {
       if (!sourceBean) throw new InputError('请先保存这款豆子。');
       await db.prepare('INSERT INTO bean_skus(id,bean_id,label,harvest_year,process,altitude_m,batch_code,stock_grams,is_demo,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(id, x.bean_id, x.label, x.harvest_year, x.process, x.altitude_m, x.batch_code, x.stock_grams, sourceBean.is_demo || 0, now, now).run();
       if (x.stock_grams > 0)
-        await db.prepare("INSERT INTO stock_movements(id,sku_id,movement_type,delta_grams,reference_id,notes,occurred_at) VALUES(?,?,'in',?,'','创建规格时录入',?)").bind('stock-'+id, id, x.stock_grams, now).run();
+        await db.prepare("INSERT INTO stock_movements(id,sku_id,movement_type,delta_grams,reference_id,notes,occurred_at) VALUES(?,?,'in',?,'','创建批次时录入',?)").bind('stock-'+id, id, x.stock_grams, now).run();
       return json({ id }, 201);
     }
     if (b.kind === 'profile') {
@@ -290,7 +290,7 @@ export async function POST(request: Request) {
       const x = inventoryInput(b);
       if (x.delta_grams === 0) throw new InputError('库存变动不能为 0。');
       const sku = await db.prepare('SELECT stock_grams FROM bean_skus WHERE id=?').bind(x.sku_id).first<{ stock_grams: number }>();
-      if (!sku) throw new InputError('找不到这个豆子规格。', 404);
+      if (!sku) throw new InputError('找不到这个豆子批次。', 404);
       if (Number(sku.stock_grams) + x.delta_grams < 0) throw new InputError('调整后的库存不能小于 0。');
       const movementType = x.delta_grams > 0 ? 'in' : 'adjustment';
       await db.batch([
@@ -321,8 +321,6 @@ export async function POST(request: Request) {
         [
           'customer_id',
           'bean_id',
-          'profile_id',
-          'sku_id',
           'quantity_grams',
           'batch_count',
           'due_date',
@@ -342,23 +340,51 @@ export async function POST(request: Request) {
         .bind(x.customer_id)
         .first(),
       db.prepare('SELECT * FROM beans WHERE id=?').bind(x.bean_id).first(),
-      db
-        .prepare('SELECT * FROM profiles WHERE id=? AND bean_id=?')
-        .bind(x.profile_id, x.bean_id)
-        .first(),
-      db.prepare('SELECT * FROM bean_skus WHERE id=? AND bean_id=?').bind(x.sku_id, x.bean_id).first(),
+      x.profile_id
+        ? db
+            .prepare('SELECT * FROM profiles WHERE id=? AND bean_id=?')
+            .bind(x.profile_id, x.bean_id)
+            .first()
+        : Promise.resolve(null),
+      x.sku_id
+        ? db.prepare('SELECT * FROM bean_skus WHERE id=? AND bean_id=?').bind(x.sku_id, x.bean_id).first()
+        : db
+            .prepare('SELECT * FROM bean_skus WHERE bean_id=? AND stock_grams>=? ORDER BY stock_grams DESC LIMIT 1')
+            .bind(x.bean_id, x.quantity_grams)
+            .first(),
     ]);
-    if (!customer || !bean || !profileRow || !sku)
-      throw new InputError('客户、豆子规格或烘焙方案已变化，请重新选择。');
+    if (!customer || !bean || !sku)
+      throw new InputError('客户、豆子或可用库存已变化，请重新选择。');
     if (Number(sku.stock_grams) < x.quantity_grams)
-      throw new InputError('这个规格的库存不足，请先入库或减少订单重量。');
-    const profile = decodeProfile(profileRow) as Profile;
+      throw new InputError('这款豆子的库存不足，请先入库或减少订单重量。');
+    const pendingProfileId = 'pending-profile-' + x.bean_id;
+    const profile = profileRow
+      ? (decodeProfile(profileRow) as Profile)
+      : {
+          id: pendingProfileId,
+          is_demo: Number(bean.is_demo || 0),
+          bean_id: x.bean_id,
+          name: '烘焙时决定',
+          roast_level: '待确定',
+          machine: '',
+          batch_grams: 0,
+          points: [],
+          notes: '系统占位记录：真正的烘焙方案在开始本锅时决定。',
+          revision: 0,
+          created_at: now,
+          updated_at: now,
+        };
     const isDemo = customer.is_demo || bean.is_demo || profile.is_demo ? 1 : 0;
     const code =
       'PR-' +
       now.slice(0, 10).replaceAll('-', '') +
       '-' +
       x.id.replaceAll('-', '').slice(0, 8).toUpperCase();
+    if (!profileRow)
+      await db
+        .prepare('INSERT OR IGNORE INTO profiles(id,bean_id,name,roast_level,machine,batch_grams,points,notes,revision,is_demo,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,1,?,?,?)')
+        .bind(profile.id, x.bean_id, profile.name, profile.roast_level, '', 1, '[]', profile.notes, profile.is_demo, now, now)
+        .run();
     const inserted = await db.batch<Record<string, unknown>>([
       db
         .prepare(
@@ -369,10 +395,10 @@ export async function POST(request: Request) {
           code,
           x.customer_id,
           x.bean_id,
-          x.profile_id,
+          profile.id,
           customer.name,
           bean.name,
-          x.sku_id,
+          sku.id,
           JSON.stringify(sku),
           JSON.stringify(profile),
           x.quantity_grams,
@@ -384,8 +410,8 @@ export async function POST(request: Request) {
           now,
           now,
         ),
-      db.prepare('UPDATE bean_skus SET stock_grams=stock_grams-?,updated_at=? WHERE id=? AND stock_grams>=?').bind(x.quantity_grams, now, x.sku_id, x.quantity_grams),
-      db.prepare("INSERT OR IGNORE INTO stock_movements(id,sku_id,movement_type,delta_grams,reference_id,notes,occurred_at) VALUES(?,?,'order',?,?,?,?)").bind('stock-'+x.id, x.sku_id, -x.quantity_grams, x.id, '创建订单自动扣减', now),
+      db.prepare('UPDATE bean_skus SET stock_grams=stock_grams-?,updated_at=? WHERE id=? AND stock_grams>=?').bind(x.quantity_grams, now, sku.id, x.quantity_grams),
+      db.prepare("INSERT OR IGNORE INTO stock_movements(id,sku_id,movement_type,delta_grams,reference_id,notes,occurred_at) VALUES(?,?,'order',?,?,?,?)").bind('stock-'+x.id, sku.id, -x.quantity_grams, x.id, '创建订单自动扣减', now),
       db
         .prepare(
           "INSERT OR IGNORE INTO order_events(id,order_id,status,occurred_at) VALUES(?,?,'waiting',?)",
