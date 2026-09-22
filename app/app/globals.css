@@ -2399,3 +2399,18 @@ h1 { font-size: 35px; font-weight: 600; letter-spacing: -1.3px; }
 .record-list .customer-card .customer-card-head { margin: 0; }
 .record-list .customer-card .customer-card-bottom { border: 0; padding: 0; }
 @media (max-width: 760px) { .record-list .bean-card, .record-list .customer-card { display: block; } .record-mode-toggle button { padding: 0 7px; } }
+.sectioned-nav { display: grid; gap: 17px; }
+.nav-section { display: grid; gap: 5px; }
+.nav-section .nav-label { margin: 0 0 2px; }
+.dashboard-grid { display: grid; gap: 18px; }
+.dashboard-hero { display: flex; align-items: center; justify-content: space-between; gap: 28px; min-height: 190px; padding: clamp(24px, 4vw, 46px); background: linear-gradient(120deg, #f5eee1, #eef4f3); }
+.dashboard-hero h2 { max-width: 550px; margin: 8px 0; color: #293d43; font-family: Georgia, 'Noto Serif SC', serif; font-size: clamp(25px, 3vw, 38px); line-height: 1.25; }
+.dashboard-hero p:last-child { max-width: 560px; margin: 0; color: #65777b; line-height: 1.7; }
+.dashboard-cta { flex: 0 0 auto; }
+.dashboard-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.dashboard-stats a { display: grid; gap: 4px; padding: 19px; background: #fff; border: 1px solid #dbe5e5; border-radius: 14px; }
+.dashboard-stats span, .dashboard-stats small { color: #718287; font-size: 12px; }.dashboard-stats strong { color: #2e444a; font-size: 30px; line-height: 1; }
+.dashboard-section { padding: 20px; }.dashboard-actions { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }.dashboard-actions.archive { grid-template-columns: repeat(3, minmax(0,1fr)); }
+.dashboard-actions a { display: grid; grid-template-columns: auto 1fr auto; gap: 11px; align-items: center; min-height: 92px; padding: 16px; color: #41585e; background: #f5f8f8; border: 1px solid #dce6e6; border-radius: 13px; }.dashboard-actions a > svg:first-child { color: #bc7040; }.dashboard-actions strong, .dashboard-actions span { display: block; }.dashboard-actions strong { color: #2e444a; font-size: 14px; }.dashboard-actions span { margin-top: 4px; color: #708187; font-size: 11px; line-height: 1.5; }
+@media (max-width: 860px) { .dashboard-hero { display: grid; }.dashboard-actions.archive { grid-template-columns: 1fr; } }.dashboard-actions { grid-template-columns: 1fr; }
+@media (max-width: 560px) { .dashboard-stats { grid-template-columns: 1fr; } }
