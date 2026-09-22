@@ -1,0 +1,33 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "penguin-roastory",
+  "account_id": "660184157223097c9afd3d253ec86ce6",
+  "main": "dist/server/index.js",
+  "compatibility_date": "2026-05-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "dist/client"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "penguin-roastory-db",
+      "database_id": "b8d1952c-e9e4-4c2f-af6b-5d1d9b5fd850"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ASSETS",
+      "bucket_name": "penguin-roastory-assets"
+    }
+  ],
+  "routes": [
+    {
+      "pattern": "roastory.mia-dynamic.com",
+      "custom_domain": true
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}
