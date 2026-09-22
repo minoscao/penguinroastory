@@ -60,24 +60,7 @@ async function upgradeCatalog(db: D1Database) {
   ])
     await db.prepare(statement).run();
 
-  const now = new Date().toISOString();
-  const demoSkus = [
-    ['demo-v2-sku-ethiopia', 'demo-v1-bean-ethiopia', '2026 水洗批次', '2026', '水洗', 2050, 'ETH-2601', 18000],
-    ['demo-v2-sku-colombia', 'demo-v1-bean-colombia', '2025 蜜处理批次', '2025', '蜜处理', 1850, 'COL-2508', 32000],
-    ['demo-v2-sku-brazil', 'demo-v1-bean-brazil', '2025 日晒批次', '2025', '日晒', 1100, 'BRA-2512', 48000],
-  ] as const;
-  for (const sku of demoSkus)
-    await db
-      .prepare(
-        'INSERT OR IGNORE INTO bean_skus(id,bean_id,label,harvest_year,process,altitude_m,batch_code,stock_grams,is_demo,created_at,updated_at) SELECT ?,?,?,?,?,?,?,?,1,?,? WHERE EXISTS(SELECT 1 FROM beans WHERE id=?)',
-      )
-      .bind(...sku, now, now, sku[1])
-      .run();
-  await db
-    .prepare(
-      "UPDATE orders SET sku_id=CASE bean_id WHEN 'demo-v1-bean-ethiopia' THEN 'demo-v2-sku-ethiopia' WHEN 'demo-v1-bean-colombia' THEN 'demo-v2-sku-colombia' WHEN 'demo-v1-bean-brazil' THEN 'demo-v2-sku-brazil' ELSE sku_id END WHERE is_demo=1 AND sku_id=''",
-    )
-    .run();
+
 }
 export async function getD1() {
   if (!env.DB) throw new Error('Database unavailable');

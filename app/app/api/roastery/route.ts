@@ -1,5 +1,4 @@
 import { getD1 } from '@/db';
-import { seedDemo } from '@/db/seed-demo';
 import {
   InputError,
   object,
@@ -210,7 +209,6 @@ export async function POST(request: Request) {
     const db = await getD1();
     const now = new Date().toISOString();
     const id = crypto.randomUUID();
-    if (b.kind === 'demo') return json(await seedDemo(db));
     if (b.kind === 'customer') {
       const x = customerInput(b);
       await db

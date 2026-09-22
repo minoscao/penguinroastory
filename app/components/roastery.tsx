@@ -37,6 +37,9 @@ import {
   Warehouse,
   Truck,
   LayoutDashboard,
+  List,
+  LayoutGrid,
+  CalendarDays,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -96,6 +99,7 @@ type Modal =
   | { type: 'profile'; bean: Bean; record?: Profile }
   | { type: 'order' }
   | { type: 'detail'; id: string };
+type RecordMode = 'list' | 'cards' | 'calendar';
 type Mutate = (
   method: string,
   payload: Record<string, unknown>,
@@ -354,6 +358,56 @@ function ProfileSummary({ profile }: { profile: Profile }) {
   );
 }
 
+function RecordModeToggle({
+  mode,
+  setMode,
+  modes,
+}: {
+  mode: RecordMode;
+  setMode: (mode: RecordMode) => void;
+  modes: RecordMode[];
+}) {
+  const options: Record<RecordMode, { label: string; icon: typeof List }> = {
+    list: { label: '列表', icon: List },
+    cards: { label: '卡片', icon: LayoutGrid },
+    calendar: { label: '日历', icon: CalendarDays },
+  };
+  return (
+    <div className="record-mode-toggle" aria-label="记录查看方式">
+      {modes.map((item) => {
+        const option = options[item];
+        const Icon = option.icon;
+        return <button key={item} className={mode === item ? 'active' : ''} aria-pressed={mode === item} onClick={() => setMode(item)}><Icon size={15} />{option.label}</button>;
+      })}
+    </div>
+  );
+}
+function OrderCard({ order, open }: { order: RoastOrder; open: (modal: Modal) => void }) {
+  return (
+    <article className="order-record-card">
+      <div><span>{order.code}</span><StatusTag status={order.status} /></div>
+      <h3>{order.customer_name}</h3>
+      <p>{order.bean_name} · {weight(order.quantity_grams)}</p>
+      <small>{order.due_date ? '交付 ' + order.due_date : '交付日期待定'}</small>
+      <Button variant="outline" size="sm" onClick={() => open({ type: 'detail', id: order.id })}>查看订单<ArrowUpRight size={13} /></Button>
+    </article>
+  );
+}
+function OrderCalendar({ orders, open }: { orders: RoastOrder[]; open: (modal: Modal) => void }) {
+  const grouped = new Map<string, RoastOrder[]>();
+  for (const order of orders) {
+    const date = order.due_date || '未安排交付日期';
+    grouped.set(date, [...(grouped.get(date) || []), order]);
+  }
+  return (
+    <div className="order-calendar">
+      {[...grouped.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, items]) => (
+        <section key={date}><h3><CalendarDays size={16} />{date}</h3>{items.map((order) => <button key={order.id} onClick={() => open({ type: 'detail', id: order.id })}><span>{order.customer_name}</span><strong>{order.bean_name}</strong><small>{weight(order.quantity_grams)}</small><StatusTag status={order.status} /></button>)}</section>
+      ))}
+    </div>
+  );
+}
+
 export default function Roastery({ view = 'orders' }: { view?: View }) {
   const [catalog, setCatalog] = useState<Catalog | null>(null),
     [catalogError, setCatalogError] = useState(''),
@@ -364,11 +418,12 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
     [toast, setToast] = useState('');
   const lock = useRef(false);
   const [filter, setFilter] = useState('all'),
-    [source, setSource] = useState('all'),
+    [source] = useState('all'),
     [customerType, setCustomerType] = useState('all'),
     [q, setQ] = useState(''),
     [search, setSearch] = useState(''),
-    [page, setPage] = useState(1);
+    [page, setPage] = useState(1),
+    [recordMode, setRecordMode] = useState<RecordMode>('list');
   const [list, setList] = useState<{
       orders: RoastOrder[];
       total: number;
@@ -555,36 +610,6 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
             </Button>
           )}
         </header>
-        {!!catalog?.demo_counts?.customers && (
-          <div className="demo-banner">
-            <span className="demo-banner-icon">
-              <Sparkles size={21} />
-            </span>
-            <div>
-              <strong>
-                {source === 'all'
-                  ? '模拟资料已准备好，可以放心试一试'
-                  : '现在只显示真实资料'}
-              </strong>
-              <p>
-                {catalog.demo_counts.customers} 位模拟客户 ·{' '}
-                {catalog.demo_counts.beans} 款豆子 ·{' '}
-                {catalog.demo_counts.orders}{' '}
-                张订单。模拟记录有单独标记，不会覆盖真实资料。
-              </p>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setSource(source === 'all' ? 'real' : 'all');
-                setPage(1);
-              }}
-            >
-              {source === 'all' ? '只看真实资料' : '显示模拟资料'}
-            </Button>
-          </div>
-        )}
         {catalogError && (
           <div role="alert" className="error-banner">
             {catalogError}
@@ -678,6 +703,7 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
               </Button>
             </div>
             <div className="toolbar">
+              <RecordModeToggle mode={recordMode} setMode={setRecordMode} modes={['list', 'cards', 'calendar']} />
               {view === 'orders' && (
                 <div className="filter-tabs" aria-label="按订单状态筛选">
                   {(['all', 'waiting', 'roasting', 'completed'] as const).map(
@@ -727,6 +753,13 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
               <output className="loading-state">正在读取烘焙记录…</output>
             ) : list?.orders.length ? (
               <>
+                {recordMode === 'calendar' ? (
+                  <OrderCalendar orders={list.orders} open={open} />
+                ) : recordMode === 'cards' ? (
+                  <div className="order-card-grid">
+                    {list.orders.map((o) => <OrderCard key={o.id} order={o} open={open} />)}
+                  </div>
+                ) : (
                 <Table className="orders-table">
                   <TableHeader>
                     <TableRow>
@@ -816,6 +849,7 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                     ))}
                   </TableBody>
                 </Table>
+                )}
                 <div className="pagination">
                   <span>
                     共 {list.total} 张订单 · 第 {page} /{' '}
@@ -886,6 +920,7 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                     : '—'}
                 </span>
               </span>
+              <RecordModeToggle mode={recordMode} setMode={setRecordMode} modes={['list', 'cards']} />
               <div className="search-box">
                 <Search size={16} />
                 <Input
@@ -903,7 +938,7 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
             {!catalog ? (
               <div className="loading-state">正在读取档案…</div>
             ) : view === 'beans' ? (
-              <div className="catalog-grid">
+              <div className={'catalog-grid ' + (recordMode === 'list' ? 'record-list' : '')}>
                 {catalog.beans
                   .filter((b) =>
                     (b.name + b.origin + b.process + b.variety + b.notes)
@@ -1030,7 +1065,7 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                     </button>
                   ))}
                 </div>
-                <div className="customer-grid">
+                <div className={'customer-grid ' + (recordMode === 'list' ? 'record-list' : '')}>
                   {visibleCustomers.map((c, i) => (
                     <article
                       className={'customer-card customer-' + c.customer_type}

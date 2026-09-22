@@ -2375,3 +2375,27 @@ h1 { font-size: 35px; font-weight: 600; letter-spacing: -1.3px; }
 .stage-keypad button:hover { background: #e4eded; }
 .stage-keypad .erase { display: grid; place-items: center; }
 @media (max-width: 560px) { .stage-touch-grid { grid-template-columns: 1fr; } }
+.record-mode-toggle { display: inline-flex; gap: 4px; padding: 4px; background: #eef3f3; border: 1px solid #dbe5e5; border-radius: 11px; }
+.record-mode-toggle button { display: inline-flex; align-items: center; gap: 5px; min-height: 31px; padding: 0 9px; color: #60757a; background: transparent; border: 0; border-radius: 8px; font-size: 12px; font-weight: 700; }
+.record-mode-toggle button.active { color: #fff; background: #30454c; }
+.order-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
+.order-record-card { display: grid; gap: 8px; padding: 18px; background: #fff; border: 1px solid #dbe5e5; border-radius: 15px; }
+.order-record-card > div { display: flex; justify-content: space-between; gap: 8px; color: #6c7e82; font-size: 11px; }
+.order-record-card h3 { margin: 2px 0 0; color: #273c43; font-size: 17px; }
+.order-record-card p, .order-record-card small { margin: 0; color: #6d8084; }
+.order-record-card .button { justify-self: start; margin-top: 5px; }
+.order-calendar { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+.order-calendar section { padding: 14px; background: #f5f8f8; border: 1px solid #dbe5e5; border-radius: 14px; }
+.order-calendar h3 { display: flex; align-items: center; gap: 7px; margin: 0 0 10px; color: #445b61; font-size: 13px; }
+.order-calendar section > button { display: grid; grid-template-columns: 1fr auto; width: 100%; gap: 4px 10px; padding: 11px; text-align: left; background: #fff; border: 1px solid #e1e8e8; border-radius: 10px; }
+.order-calendar section > button + button { margin-top: 8px; }
+.order-calendar strong { color: #30454c; font-size: 13px; }
+.order-calendar small { color: #718287; }
+.order-calendar .status-tag { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+.record-list { grid-template-columns: 1fr !important; }
+.record-list .bean-card { display: grid; grid-template-columns: 180px 1fr; }
+.record-list .bean-visual { min-height: 180px; }
+.record-list .customer-card { display: grid; grid-template-columns: 1.1fr 1fr 1fr auto; align-items: center; gap: 18px; }
+.record-list .customer-card .customer-card-head { margin: 0; }
+.record-list .customer-card .customer-card-bottom { border: 0; padding: 0; }
+@media (max-width: 760px) { .record-list .bean-card, .record-list .customer-card { display: block; } .record-mode-toggle button { padding: 0 7px; } }
