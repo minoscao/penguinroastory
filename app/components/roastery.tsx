@@ -3,10 +3,10 @@ import {
   useEffect,
   useRef,
   useState,
+  type ComponentProps,
   type SyntheticEvent,
   type ReactNode,
 } from 'react';
-import Link from 'next/link';
 import Image from 'next/image';
 import {
   Coffee,
@@ -82,6 +82,12 @@ import {
   type Status,
 } from '@/lib/model';
 import OperationsPanel from '@/components/operations';
+
+// Operational screens must remain reachable even when optional route prefetching
+// is unavailable on a deployed device.
+function Link({ children, ...props }: ComponentProps<'a'>) {
+  return <a {...props}>{children}</a>;
+}
 
 type View =
   | 'dashboard'
