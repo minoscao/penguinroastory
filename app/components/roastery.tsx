@@ -418,17 +418,17 @@ function Dashboard({ catalog }: { catalog: Catalog | null }) {
   const count = catalog?.stats;
   return (
     <div className="dashboard-grid">
-      <section className="dashboard-hero panel">
-        <div><p className="eyebrow">TODAY AT THE ROASTERY</p><h2>从一锅豆子开始，安排今天的工作。</h2><p>业务区处理正在发生的烘焙和发货；档案区保存完整订单、客户与豆子资料。</p></div>
-        <Link className="primary-action dashboard-cta" href="/roasting"><Flame />进入烘焙工作台</Link>
+      <section className="dashboard-hero">
+        <div><p className="eyebrow">TODAY AT THE ROASTERY</p><h2>今天的烘焙工作</h2><p>从正在处理的订单开始。</p></div>
+        <Link className="primary-action dashboard-cta" href="/roasting"><Flame />开始烘焙</Link>
       </section>
       <section className="dashboard-stats" aria-label="今日概况">
         <Link href="/roasting"><span>等待烘焙</span><strong>{count?.waiting ?? 0}</strong><small>张订单</small></Link>
         <Link href="/roasting"><span>正在烘焙</span><strong>{count?.roasting ?? 0}</strong><small>张订单</small></Link>
         <Link href="/orders"><span>已完成</span><strong>{count?.completed ?? 0}</strong><small>张订单</small></Link>
       </section>
-      <section className="dashboard-section panel"><div className="panel-heading"><div><h2>业务区</h2><p>只处理今天正在发生的工作。</p></div></div><div className="dashboard-actions"><Link href="/roasting"><Flame /><div><strong>烘焙工作台</strong><span>按豆子合并待烘焙订单，记录每一锅曲线。</span></div><ArrowRight /></Link><Link href="/fulfillment"><Truck /><div><strong>发货工作台</strong><span>查看已完成烘焙并登记快递与签收。</span></div><ArrowRight /></Link></div></section>
-      <section className="dashboard-section panel"><div className="panel-heading"><div><h2>档案区</h2><p>用于保存、查询与追溯全部资料。</p></div></div><div className="dashboard-actions archive"><Link href="/orders"><ClipboardList /><div><strong>完整订单档案</strong><span>筛选、排序、查看所有订单。</span></div><ArrowRight /></Link><Link href="/beans"><BeanIcon /><div><strong>豆子档案</strong><span>管理豆子、批次库存与烘焙方案。</span></div><ArrowRight /></Link><Link href="/customers"><Users /><div><strong>客户档案</strong><span>保存个人与企业客户资料。</span></div><ArrowRight /></Link></div></section>
+      <section className="dashboard-section panel"><div className="panel-heading"><h2>工作区</h2></div><div className="dashboard-actions"><Link href="/roasting"><Flame /><div><strong>烘焙</strong><span>合并订单，记录每一锅。</span></div><ArrowRight /></Link><Link href="/fulfillment"><Truck /><div><strong>发货</strong><span>登记快递与签收。</span></div><ArrowRight /></Link></div></section>
+      <section className="dashboard-section panel"><div className="panel-heading"><h2>档案</h2></div><div className="dashboard-actions archive"><Link href="/orders"><ClipboardList /><div><strong>订单</strong><span>全部订单与筛选。</span></div><ArrowRight /></Link><Link href="/beans"><BeanIcon /><div><strong>豆子</strong><span>库存和烘焙方案。</span></div><ArrowRight /></Link><Link href="/customers"><Users /><div><strong>客户</strong><span>联系人与偏好。</span></div><ArrowRight /></Link></div></section>
     </div>
   );
 }
@@ -575,7 +575,7 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
             <div className="nav-section" key={section.label}>
               <p className="nav-label">{section.label}</p>
               {section.items.map((n) => (
-                <Link key={n.view} className={'nav-item ' + (view === n.view ? 'active' : '')} href={n.url} aria-current={view === n.view ? 'page' : undefined}>
+                <Link key={n.view} className={'nav-item ' + (view === n.view ? 'active' : '')} href={n.url} title={views[n.view].title} aria-label={views[n.view].title} aria-current={view === n.view ? 'page' : undefined}>
                   <n.icon />{views[n.view].title}
                   {n.view === 'roasting' && count && count.waiting + count.roasting > 0 && <span className="nav-count">{count.waiting + count.roasting}</span>}
                 </Link>
