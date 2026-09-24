@@ -420,6 +420,61 @@ function OrderCalendar({ orders, open }: { orders: RoastOrder[]; open: (modal: M
   );
 }
 
+function CustomerTable({
+  customers,
+  onEdit,
+}: {
+  customers: Customer[];
+  onEdit: (customer: Customer) => void;
+}) {
+  if (customers.length === 0) return null;
+  return (
+    <div className="customer-table-wrap">
+      <table className="customer-table">
+        <thead>
+          <tr>
+            <th>客户</th>
+            <th>类型</th>
+            <th>联系人</th>
+            <th>联系方式</th>
+            <th>来源</th>
+            <th>累计订单</th>
+            <th>待完成</th>
+            <th>累计订购</th>
+            <th>最近下单</th>
+            <th aria-label="操作">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {customers.map((customer, index) => (
+            <tr key={customer.id}>
+              <td className="customer-cell-name">
+                <span className={'customer-table-avatar avatar-tone-' + (index % 4)}>
+                  <CustomerIcon type={customer.customer_type} size={18} />
+                </span>
+                <strong>{customer.name}</strong>
+              </td>
+              <td>{customerTypes[customer.customer_type] || '待确认'}</td>
+              <td>{customer.contact || (customer.customer_type === 'individual' ? customer.name : '待补充')}</td>
+              <td>{customer.phone || '待补充'}</td>
+              <td>{customer.notes || '淘宝历史发货表'}</td>
+              <td>{customer.order_count || 0} 单</td>
+              <td>{customer.active_orders || 0} 单</td>
+              <td>{weight(customer.total_grams || 0)}</td>
+              <td>{customer.last_order_at ? stamp(customer.last_order_at) : '—'}</td>
+              <td className="customer-table-action">
+                <Button variant="ghost" size="sm" onClick={() => onEdit(customer)}>
+                  <Pencil size={14} /> 编辑
+                </Button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function Dashboard({ catalog }: { catalog: Catalog | null }) {
   const count = catalog?.stats;
   return (
@@ -1085,7 +1140,13 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                     </button>
                   ))}
                 </div>
-                <div className={'customer-grid ' + (recordMode === 'list' ? 'record-list' : '')}>
+                {recordMode === 'list' ? (
+                  <CustomerTable
+                    customers={visibleCustomers}
+                    onEdit={(customer) => open({ type: 'customer', record: customer })}
+                  />
+                ) : (
+                <div className="customer-grid">
                   {visibleCustomers.map((c, i) => (
                     <article
                       className={'customer-card customer-' + c.customer_type}
@@ -1159,7 +1220,9 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                       </div>
                     </article>
                   ))}
-                  {visibleCustomers.length === 0 && (
+                </div>
+                )}
+                {visibleCustomers.length === 0 && (
                     <div className="panel empty-state full-width">
                       <Users size={38} />
                       <h3>
@@ -1177,7 +1240,6 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                       </Button>
                     </div>
                   )}
-                </div>
               </section>
             )}
           </>
