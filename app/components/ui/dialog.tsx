@@ -62,13 +62,8 @@ function DialogContent({
         {showCloseButton && (
           <DialogPrimitive.Close
             data-slot="dialog-close"
-            render={
-              <Button
-                variant="ghost"
-                className="absolute top-2 right-2"
-                size="icon-sm"
-              />
-            }
+            aria-label="关闭窗口"
+            className="absolute top-2 right-2 z-10 inline-grid size-8 place-items-center rounded-lg border border-[#dce4e4] bg-white text-[#40565b] hover:bg-[#edf2f2] focus:outline-none focus:ring-2 focus:ring-[#8aa5a5]"
           >
             <XIcon />
             <span className="sr-only">关闭</span>
