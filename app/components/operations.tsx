@@ -118,7 +118,7 @@ async function callApi<T = Record<string, unknown>>(
 }
 
 function kg(grams: number) {
-  return (grams / 1000).toLocaleString('zh-CN', { maximumFractionDigits: 3 }) + ' kg';
+  return Math.round(grams).toLocaleString('zh-CN') + ' g';
 }
 
 function time(value?: string | null) {
@@ -862,12 +862,12 @@ function InventoryForm({ sku, busy, submit }: { sku: BeanSku; busy: boolean; sub
   function handleSubmit(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
     const values = Object.fromEntries(new FormData(event.currentTarget));
-    const grams = Math.round(Number(values.quantity_kg) * 1000) * (direction === 'in' ? 1 : -1);
+    const grams = Math.round(Number(values.quantity_g)) * (direction === 'in' ? 1 : -1);
     submit({ kind: 'inventory', sku_id: sku.id, delta_grams: grams, notes: values.notes });
   }
   return <form onSubmit={handleSubmit}><fieldset disabled={busy} className="form-grid">
     <label className="field" htmlFor="inventory-action"><span>操作 *</span><NativeSelect id="inventory-action" value={direction} onChange={(event) => setDirection(event.target.value as 'in' | 'out')}><option value="in">入库</option><option value="out">调减 / 盘亏</option></NativeSelect></label>
-    <label className="field" htmlFor="inventory-weight"><span>重量（kg）*</span><Input id="inventory-weight" name="quantity_kg" type="number" min="0.001" step="0.001" required /></label>
+    <label className="field" htmlFor="inventory-weight"><span>重量（g）*</span><Input id="inventory-weight" name="quantity_g" type="number" min="1" step="1" required /></label>
     <label className="field field-wide" htmlFor="inventory-notes"><span>备注</span><Textarea id="inventory-notes" name="notes" maxLength={500} placeholder="例如：9月到货、盘点修正…" /></label>
     <div className="form-actions field-wide"><span>调整后库存不能小于 0</span><Button className="primary-action" type="submit"><Warehouse />{busy ? '正在保存…' : '保存库存'}</Button></div>
   </fieldset></form>;

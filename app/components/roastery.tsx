@@ -175,9 +175,7 @@ function message(e: unknown) {
   return e instanceof Error ? e.message : '暂时无法连接，请稍后重试。';
 }
 function weight(grams: number) {
-  return (
-    (grams / 1000).toLocaleString('zh-CN', { maximumFractionDigits: 3 }) + ' kg'
-  );
+  return Math.round(grams).toLocaleString('zh-CN') + ' g';
 }
 function stamp(s: string | null) {
   return s
@@ -1421,7 +1419,7 @@ function SkuForm({
         ...data,
         kind: 'sku',
         bean_id: bean.id,
-        stock_grams: Math.round(Number(data.stock_kg || 0) * 1000),
+        stock_grams: Math.round(Number(data.stock_g || 0)),
       },
       '豆子批次和初始库存已保存',
     );
@@ -1444,8 +1442,8 @@ function SkuForm({
         <Field label="批次编号">
           <Input name="batch_code" maxLength={80} placeholder="例如 ETH-2601" />
         </Field>
-        <Field label="初始库存（kg）*" wide>
-          <Input name="stock_kg" type="number" required min="0" max="100000" step="0.001" defaultValue="0" />
+        <Field label="初始库存（g）*" wide>
+          <Input name="stock_g" type="number" required min="0" max="100000000" step="1" defaultValue="0" />
         </Field>
         <p className="hint field-wide">保存以后，这个批次会进入库存管理；新订单会自动从可用批次扣减。</p>
         <div className="form-actions field-wide">
@@ -1656,7 +1654,7 @@ function ProfileForm({
           ...data,
           kind: 'profile',
           bean_id: bean.id,
-          batch_grams: Math.round(Number(data.batch_kg) * 1000),
+          batch_grams: Math.round(Number(data.batch_g)),
           points: points.map((p) => ({
             stage: p.stage,
             seconds: seconds(p.time),
@@ -1703,14 +1701,14 @@ function ProfileForm({
             ))}
           </NativeSelect>
         </Field>
-        <Field label="方案投豆量（生豆 kg）*">
+        <Field label="方案投豆量（生豆 g）*">
           <Input
-            name="batch_kg"
+            name="batch_g"
             type="number"
-            min="0.001"
-            max="1000"
-            step="0.001"
-            defaultValue={profile ? profile.batch_grams / 1000 : undefined}
+            min="1"
+            max="1000000"
+            step="1"
+            defaultValue={profile ? profile.batch_grams : undefined}
             placeholder="这一锅投入多少生豆"
             required
           />
@@ -1863,7 +1861,7 @@ function OrderForm({
         kind: 'order',
         id: requestId,
         bean_id: beanId,
-        quantity_grams: Math.round(Number(data.quantity_kg) * 1000),
+        quantity_grams: Math.round(Number(data.quantity_g)),
         batch_count: 1,
       },
       '订单已创建，正在等待烘焙',
@@ -1942,14 +1940,14 @@ function OrderForm({
             你选用了模拟资料，这张订单也会标为模拟。示例曲线仅供体验，请勿直接用于实际烘焙。
           </p>
         )}
-        <Field label="订单重量（kg）*">
+        <Field label="订单重量（g）*">
           <Input
-            name="quantity_kg"
+            name="quantity_g"
             type="number"
             required
-            min="0.001"
-            max="100000"
-            step="0.001"
+            min="1"
+            max="100000000"
+            step="1"
             placeholder="本次计划使用的生豆重量"
           />
         </Field>
