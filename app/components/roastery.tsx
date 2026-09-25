@@ -46,13 +46,6 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { NativeSelect } from '@/components/ui/native-select';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from '@/components/ui/dialog';
-import {
   Table,
   TableBody,
   TableCell,
@@ -1257,36 +1250,19 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
           </button>
         </output>
       )}
-      <Dialog
-        open={!!modal}
-        onOpenChange={(openState) => {
-          if (!openState && !busy) {
-            setModal(null);
-            setFormError('');
-          }
-        }}
-      >
-        <DialogContent
-          showCloseButton={false}
-          key={
-            modal
-              ? modal.type + '-' +
-                ('record' in modal && modal.record
-                  ? modal.record.id
-                  : 'id' in modal
-                    ? modal.id
-                    : 'bean' in modal
-                      ? modal.bean.id
-                      : 'new')
-              : 'closed'
-          }
-          className={
-            'roast-dialog ' +
-            (modal?.type === 'profile' || modal?.type === 'detail'
-              ? 'wide-dialog'
-              : '')
-          }
-        >
+      {modal && (
+        <div className="archive-sheet-layer" role="presentation">
+          <dialog
+            open
+            aria-modal="true"
+            aria-label="编辑窗口"
+            className={
+              'roast-dialog archive-sheet ' +
+              (modal.type === 'profile' || modal.type === 'detail'
+                ? 'wide-dialog'
+                : '')
+            }
+          >
           <button
             type="button"
             className="sheet-close"
@@ -1298,8 +1274,8 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
           >
             <X size={20} />
           </button>
-          <DialogHeader>
-            <DialogTitle>
+          <header className="sheet-header">
+            <h2>
               {modal?.type === 'customer'
                 ? modal.record
                   ? '编辑客户'
@@ -1319,9 +1295,9 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                       : modal?.type === 'order'
                         ? '新建烘焙订单'
                         : '订单详情'}
-            </DialogTitle>
+            </h2>
             {modal?.type !== 'customer' && modal?.type !== 'bean' && modal?.type !== 'detail' && (
-              <DialogDescription>
+              <p>
                 {modal?.type === 'order'
                 ? '选好客户、豆子和方案，安排这次烘焙。'
                 : modal?.type === 'sku'
@@ -1331,9 +1307,9 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                   : modal?.type === 'profiles'
                     ? '同一款豆子，可以保存不同的烘焙方案。'
                     : ''}
-              </DialogDescription>
+              </p>
             )}
-          </DialogHeader>
+          </header>
           {formError && (
             <div role="alert" className="form-error">
               {formError}
@@ -1421,8 +1397,9 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
               mutate={mutate}
             />
           )}
-        </DialogContent>
-      </Dialog>
+          </dialog>
+        </div>
+      )}
     </div>
   );
 }
