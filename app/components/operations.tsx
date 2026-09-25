@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type SyntheticEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type SyntheticEvent } from 'react';
 import Link from 'next/link';
 import {
   ArrowRight,
@@ -14,6 +14,7 @@ import {
   Plus,
   Scale,
   Send,
+  ScanLine,
   Thermometer,
   TimerReset,
   Truck,
@@ -100,6 +101,7 @@ type Props = {
   view: 'roasting' | 'fulfillment' | 'admin';
   catalog: Catalog | null;
   source: string;
+  dateFilter?: string;
   revision: number;
   onChanged: (notice: string) => void;
 };
@@ -142,6 +144,7 @@ export default function OperationsPanel({
   view,
   catalog,
   source,
+  dateFilter = '',
   revision,
   onChanged,
 }: Props) {
@@ -162,7 +165,7 @@ export default function OperationsPanel({
       if (!controller.signal.aborted) setError('');
     });
     callApi<OperationsData>(
-      '/api/roastery?' + new URLSearchParams({ kind: 'operations', source }),
+      '/api/roastery?' + new URLSearchParams({ kind: 'operations', source, date: dateFilter }),
       { signal: controller.signal },
     )
       .then(setData)
@@ -170,7 +173,7 @@ export default function OperationsPanel({
         if (!controller.signal.aborted) setError(e instanceof Error ? e.message : '读取失败');
       });
     return () => controller.abort();
-  }, [source, revision, reload]);
+  }, [source, dateFilter, revision, reload]);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -845,6 +848,60 @@ function AdminBoard({ data, catalog, openInventory }: { data: OperationsData; ca
 }
 
 function ShipmentForm({ order, busy, submit }: { order: RoastOrder | 'sample'; busy: boolean; submit: (payload: Record<string, unknown>) => void }) {
+  const [trackingNumber, setTrackingNumber] = useState('');
+  const [scanStream, setScanStream] = useState<MediaStream | null>(null);
+  const [scanNote, setScanNote] = useState('');
+  const videoRef = useRef<HTMLVideoElement>(null);
+  type Detector = { detect(source: HTMLVideoElement): Promise<{ rawValue: string }[]> };
+  type DetectorConstructor = new (options?: { formats?: string[] }) => Detector;
+  function stopScanner() {
+    setScanStream(null);
+  }
+  async function startScanner() {
+    setScanNote('');
+    const DetectorClass = (window as unknown as { BarcodeDetector?: DetectorConstructor }).BarcodeDetector;
+    if (!DetectorClass) {
+      setScanNote('这台设备不支持相机识别；可以直接用扫码枪扫进单号输入框。');
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+      setScanStream(stream);
+      setScanNote('请将快递单条码放入取景框。识别后会自动填入单号。');
+    } catch {
+      setScanNote('无法打开相机。请允许相机权限，或直接扫码枪录入单号。');
+    }
+  }
+  useEffect(() => {
+    if (!scanStream || !videoRef.current) return;
+    const video = videoRef.current;
+    const DetectorClass = (window as unknown as { BarcodeDetector?: DetectorConstructor }).BarcodeDetector;
+    if (!DetectorClass) return;
+    const detector = new DetectorClass({ formats: ['code_128', 'code_39', 'ean_13', 'ean_8', 'itf', 'upc_a', 'upc_e'] });
+    let cancelled = false;
+    let frame = 0;
+    video.srcObject = scanStream;
+    const scan = async () => {
+      if (cancelled) return;
+      if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+        const result = await detector.detect(video).catch(() => []);
+        const code = result[0]?.rawValue?.trim();
+        if (code) {
+          setTrackingNumber(code);
+          setScanNote('已识别快递单号：' + code);
+          setScanStream(null);
+          return;
+        }
+      }
+      frame = window.requestAnimationFrame(() => void scan());
+    };
+    void video.play().then(() => void scan()).catch(() => setScanNote('相机预览未能启动，请检查相机权限。'));
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frame);
+      scanStream.getTracks().forEach((track) => track.stop());
+    };
+  }, [scanStream]);
   function handleSubmit(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
     const values = Object.fromEntries(new FormData(event.currentTarget));
@@ -853,7 +910,8 @@ function ShipmentForm({ order, busy, submit }: { order: RoastOrder | 'sample'; b
   return <form onSubmit={handleSubmit}><fieldset disabled={busy} className="form-grid">
     <label className="field field-wide" htmlFor="shipment-customer"><span>客户</span><Input id="shipment-customer" name="customer_name" required={order === 'sample'} readOnly={order !== 'sample'} defaultValue={order === 'sample' ? '' : order.customer_name} placeholder="样品收件人或单位" /></label>
     <label className="field" htmlFor="shipment-carrier"><span>快递公司 *</span><NativeSelect id="shipment-carrier" name="carrier" required defaultValue="顺丰"><option>顺丰</option><option>京东物流</option><option>中通</option><option>自提</option><option>其他</option></NativeSelect></label>
-    <label className="field" htmlFor="shipment-tracking"><span>快递单号 *</span><Input id="shipment-tracking" name="tracking_number" required placeholder="扫描或填写单号" /></label>
+    <div className="field shipment-tracking-field"><span>快递单号 *</span><div className="shipment-tracking-input"><Input id="shipment-tracking" name="tracking_number" required value={trackingNumber} onChange={(event) => setTrackingNumber(event.target.value)} placeholder="扫描或填写单号" /><Button type="button" variant="outline" onClick={() => void startScanner()}><ScanLine />扫描录入</Button></div></div>
+    {(scanNote || scanStream) && <div className="shipment-scanner field-wide">{scanStream && <video ref={videoRef} className="scanner-preview" muted playsInline />}{scanNote && <small>{scanNote}</small>}{scanStream && <Button type="button" variant="outline" size="sm" onClick={stopScanner}>停止扫描</Button>}</div>}
     <label className="field field-wide" htmlFor="shipment-notes"><span>发货备注</span><Textarea id="shipment-notes" name="notes" maxLength={500} placeholder="包装、样品内容或其他提醒…" /></label>
     <div className="form-actions field-wide"><span>物流轨迹暂时手动确认</span><Button className="primary-action" type="submit"><Send />{busy ? '正在保存…' : '确认发货'}</Button></div>
   </fieldset></form>;

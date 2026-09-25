@@ -178,6 +178,16 @@ function message(e: unknown) {
 function weight(grams: number) {
   return Math.round(grams).toLocaleString('zh-CN') + ' g';
 }
+function DateFilter({ value, onChange, label }: { value: string; onChange: (value: string) => void; label: string }) {
+  return (
+    <label className="date-filter">
+      <CalendarDays size={15} />
+      <span>{label}</span>
+      <Input aria-label={label} type="date" value={value} onChange={(event) => onChange(event.target.value)} />
+      {value && <button type="button" aria-label="清除日期筛选" onClick={() => onChange('')}><X size={13} /></button>}
+    </label>
+  );
+}
 function stamp(s: string | null) {
   return s
     ? new Intl.DateTimeFormat('zh-CN', {
@@ -500,6 +510,7 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
     [customerType, setCustomerType] = useState('all'),
     [q, setQ] = useState(''),
     [search, setSearch] = useState(''),
+    [dateFilter, setDateFilter] = useState(''),
     [page, setPage] = useState(1),
     [recordMode, setRecordMode] = useState<RecordMode>('list');
   const [list, setList] = useState<{
@@ -548,6 +559,7 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
           source,
           status,
           q: search,
+          date: dateFilter,
           page: String(page),
         }),
       { signal: controller.signal },
@@ -563,7 +575,7 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
         }
       });
     return () => controller.abort();
-  }, [isOrders, status, search, page, revision, source]);
+  }, [isOrders, status, search, dateFilter, page, revision, source]);
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(''), 6000);
@@ -742,16 +754,20 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
         {view === 'dashboard' ? (
           <Dashboard catalog={catalog} />
         ) : view === 'roasting' || view === 'fulfillment' || view === 'admin' ? (
-          <OperationsPanel
-            view={view}
-            catalog={catalog}
-            source={source}
-            revision={revision}
-            onChanged={(notice) => {
-              setToast(notice);
-              setRevision((value) => value + 1);
-            }}
-          />
+          <>
+            {view !== 'admin' && <DateFilter value={dateFilter} onChange={setDateFilter} label="工作日期" />}
+            <OperationsPanel
+              view={view}
+              catalog={catalog}
+              source={source}
+              dateFilter={dateFilter}
+              revision={revision}
+              onChanged={(notice) => {
+                setToast(notice);
+                setRevision((value) => value + 1);
+              }}
+            />
+          </>
         ) : isOrders ? (
           <section className="panel">
             <div className="panel-heading">
@@ -790,6 +806,7 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                   )}
                 </div>
               )}
+              <DateFilter value={dateFilter} onChange={(date) => { setDateFilter(date); setPage(1); }} label={view === 'completed' ? '完成日期' : '下单日期'} />
               <div className="search-box">
                 <Search size={16} />
                 <Input

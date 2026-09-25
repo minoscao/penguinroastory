@@ -74,6 +74,9 @@ export async function GET(request: Request) {
     const p = new URL(request.url).searchParams;
     const kind = p.get('kind') || 'catalog';
     const source = p.get('source') || 'all';
+    const date = text(p.get('date'), '日期', 10);
+    if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date))
+      throw new InputError('日期格式不正确。');
     if (!['all', 'real'].includes(source))
       throw new InputError('记录筛选无效。');
     const realOnly = source === 'real';
@@ -123,10 +126,16 @@ export async function GET(request: Request) {
       });
     }
     if (kind === 'operations') {
+      const orderDate = date ? ' AND substr(created_at,1,10)=?' : '';
+      const shipmentDate = date
+        ? (realOnly
+            ? ' AND substr(s.shipped_at,1,10)=?'
+            : ' WHERE substr(s.shipped_at,1,10)=?')
+        : '';
       const [active, completed, shipments, movements] = await db.batch<Record<string, unknown>>([
-        db.prepare("SELECT * FROM orders WHERE status IN ('waiting','roasting')" + (realOnly ? ' AND is_demo=0' : '') + ' ORDER BY due_date ASC,created_at ASC LIMIT 300'),
-        db.prepare("SELECT * FROM orders WHERE status='completed'" + (realOnly ? ' AND is_demo=0' : '') + ' ORDER BY completed_at DESC LIMIT 300'),
-        db.prepare('SELECT s.*,o.code AS order_code,o.bean_name,o.quantity_grams FROM shipments s LEFT JOIN orders o ON o.id=s.order_id' + (realOnly ? ' WHERE s.is_sample=1 OR o.is_demo=0' : '') + ' ORDER BY s.shipped_at DESC LIMIT 300'),
+        db.prepare("SELECT * FROM orders WHERE status IN ('waiting','roasting')" + (realOnly ? ' AND is_demo=0' : '') + orderDate + ' ORDER BY due_date ASC,created_at ASC LIMIT 300').bind(...(date ? [date] : [])),
+        db.prepare("SELECT * FROM orders WHERE status='completed'" + (realOnly ? ' AND is_demo=0' : '') + orderDate + ' ORDER BY completed_at DESC LIMIT 300').bind(...(date ? [date] : [])),
+        db.prepare('SELECT s.*,o.code AS order_code,o.bean_name,o.quantity_grams FROM shipments s LEFT JOIN orders o ON o.id=s.order_id' + (realOnly ? ' WHERE (s.is_sample=1 OR o.is_demo=0)' : '') + shipmentDate + ' ORDER BY s.shipped_at DESC LIMIT 300').bind(...(date ? [date] : [])),
         db.prepare('SELECT m.*,s.label AS sku_label,b.name AS bean_name FROM stock_movements m JOIN bean_skus s ON s.id=m.sku_id JOIN beans b ON b.id=s.bean_id' + (realOnly ? ' WHERE s.is_demo=0' : '') + ' ORDER BY m.occurred_at DESC LIMIT 80'),
       ]);
       return json({
@@ -160,6 +169,12 @@ export async function GET(request: Request) {
     const conditions: string[] = [];
     const bindings: (string | number)[] = [];
     if (realOnly) conditions.push('is_demo=0');
+    if (date) {
+      conditions.push(
+        `substr(${status === 'completed' ? 'completed_at' : 'created_at'},1,10)=?`,
+      );
+      bindings.push(date);
+    }
     const customerId = text(p.get('customer_id'), '客户', 80);
     if (customerId) {
       conditions.push('customer_id=?');
@@ -591,6 +606,7 @@ export async function DELETE(request: Request) {
       if (!result.meta.changes) throw new InputError('客户档案不存在。', 404);
       return json({ id });
     }
+
     if (kind === 'bean') {
       const order = await db
         .prepare('SELECT code FROM orders WHERE bean_id=? LIMIT 1')
