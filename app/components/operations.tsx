@@ -767,18 +767,21 @@ function formatSeconds(seconds: number) {
 }
 
 function FulfillmentBoard({ data, busy, openShipment, delivered }: { data: OperationsData; busy: boolean; openShipment: (order: RoastOrder | 'sample') => void; delivered: (id: string) => void }) {
+  const [view, setView] = useState<'pending' | 'shipped' | 'delivered'>('pending');
   const shippedOrderIds = new Set(data.shipments.map((shipment) => shipment.order_id).filter(Boolean));
   const pending = data.completed_orders.filter((order) => !shippedOrderIds.has(order.id));
   const inTransit = data.shipments.filter((shipment) => shipment.status === 'shipped');
   const deliveredItems = data.shipments.filter((shipment) => shipment.status === 'delivered');
+  const shipments = view === 'shipped' ? inTransit : deliveredItems;
+  const viewTitle = view === 'shipped' ? '运输途中' : '已经签收';
   return (
     <>
       <div className="operation-stats">
-        <div className="operation-stat urgent"><span><PackageCheck />等待发货</span><strong>{pending.length}</strong><small>张订单</small></div>
-        <div className="operation-stat"><span><Truck />运输途中</span><strong>{inTransit.length}</strong><small>个包裹</small></div>
-        <div className="operation-stat"><span><CheckCheck />已经签收</span><strong>{deliveredItems.length}</strong><small>个包裹</small></div>
+        <button className={'operation-stat urgent ' + (view === 'pending' ? 'active' : '')} onClick={() => setView('pending')}><span><PackageCheck />等待发货</span><strong>{pending.length}</strong><small>张订单</small></button>
+        <button className={'operation-stat ' + (view === 'shipped' ? 'active' : '')} onClick={() => setView('shipped')}><span><Truck />运输途中</span><strong>{inTransit.length}</strong><small>个包裹</small></button>
+        <button className={'operation-stat ' + (view === 'delivered' ? 'active' : '')} onClick={() => setView('delivered')}><span><CheckCheck />已经签收</span><strong>{deliveredItems.length}</strong><small>个包裹</small></button>
       </div>
-      <section className="panel fulfillment-panel">
+      {view === 'pending' ? <section className="panel fulfillment-panel">
         <div className="panel-heading operation-heading"><div><h2>等待发货</h2><p>烘焙完成的订单会自动来到这里。</p></div><Button variant="outline" onClick={() => openShipment('sample')}><Plus />登记样品发货</Button></div>
         {pending.length ? pending.map((order) => (
           <article className="shipment-row" key={order.id}>
@@ -788,18 +791,17 @@ function FulfillmentBoard({ data, busy, openShipment, delivered }: { data: Opera
             <Button className="primary-action" onClick={() => openShipment(order)}><Send />填写快递单</Button>
           </article>
         )) : <div className="operation-empty compact"><PackageCheck size={36} /><h2>没有等待发货的订单</h2></div>}
-      </section>
-      <section className="panel shipment-history">
-        <div className="panel-heading operation-heading"><div><h2>物流记录</h2><p>第一阶段手动登记；顺丰等物流接口已预留位置。</p></div></div>
-        {data.shipments.length ? data.shipments.map((shipment) => (
+      </section> : <section className="panel shipment-history">
+        <div className="panel-heading operation-heading"><div><h2>{viewTitle}</h2><p>{view === 'shipped' ? '点击“确认签收”后，包裹会移到已签收。' : '这里保留已经完成签收的发货记录。'}</p></div></div>
+        {shipments.length ? shipments.map((shipment) => (
           <article className="shipment-row" key={shipment.id}>
             <div><strong>{shipment.customer_name}</strong><small>{shipment.is_sample ? '样品发货' : shipment.order_code || '订单发货'}</small></div>
             <div><strong>{shipment.carrier}</strong><small>{shipment.tracking_number}</small></div>
             <div><small>发货时间</small><strong>{time(shipment.shipped_at)}</strong></div>
             {shipment.status === 'shipped' ? <Button variant="outline" disabled={busy} onClick={() => delivered(shipment.id)}>确认签收</Button> : <span className="delivered-tag"><CheckCheck />已签收</span>}
           </article>
-        )) : <div className="operation-empty compact"><Truck size={36} /><h2>还没有物流记录</h2></div>}
-      </section>
+        )) : <div className="operation-empty compact"><Truck size={36} /><h2>{view === 'shipped' ? '没有运输中的包裹' : '还没有签收记录'}</h2></div>}
+      </section>}
     </>
   );
 }

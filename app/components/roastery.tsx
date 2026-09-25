@@ -40,6 +40,7 @@ import {
   List,
   LayoutGrid,
   CalendarDays,
+  Trash2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -1478,6 +1479,16 @@ function CatalogForm({
       modal.type === 'customer' ? '客户档案已保存' : '豆子档案已保存',
     );
   }
+  async function remove() {
+    if (!r) return;
+    const label = modal.type === 'customer' ? '客户档案' : '豆子档案';
+    if (!window.confirm(`确认删除「${r.name}」的${label}吗？此操作无法恢复。`)) return;
+    await mutate(
+      'DELETE',
+      { kind: modal.type, id: r.id },
+      `${label}已删除`,
+    );
+  }
   return (
     <form onSubmit={submit}>
       <fieldset disabled={busy} className="form-grid">
@@ -1590,10 +1601,13 @@ function CatalogForm({
         </Field>
         <div className="form-actions field-wide">
           <span>* 为必填项</span>
-          <Button type="submit" className="primary-action">
-            {busy ? '正在保存…' : '保存档案'}
-            <Check size={16} />
-          </Button>
+          <div className="archive-form-actions">
+            {r && <Button type="button" variant="destructive" className="archive-delete" disabled={busy} onClick={() => void remove()}><Trash2 size={16} />删除档案</Button>}
+            <Button type="submit" className="primary-action">
+              {busy ? '正在保存…' : '保存档案'}
+              <Check size={16} />
+            </Button>
+          </div>
         </div>
       </fieldset>
     </form>

@@ -570,3 +570,55 @@ export async function PATCH(request: Request) {
     return failure(e);
   }
 }
+
+export async function DELETE(request: Request) {
+  try {
+    const b = await body(request);
+    const db = await getD1();
+    const id = text(b.id, '档案', 80, true);
+    const kind = text(b.kind, '档案类型', 20, true);
+    if (kind === 'customer') {
+      const order = await db
+        .prepare('SELECT code FROM orders WHERE customer_id=? LIMIT 1')
+        .bind(id)
+        .first<{ code: string }>();
+      if (order)
+        throw new InputError(
+          `客户已有订单 ${order.code}，为了保留订单追溯，暂时不能删除。`,
+          409,
+        );
+      const result = await db.prepare('DELETE FROM customers WHERE id=?').bind(id).run();
+      if (!result.meta.changes) throw new InputError('客户档案不存在。', 404);
+      return json({ id });
+    }
+    if (kind === 'bean') {
+      const order = await db
+        .prepare('SELECT code FROM orders WHERE bean_id=? LIMIT 1')
+        .bind(id)
+        .first<{ code: string }>();
+      if (order)
+        throw new InputError(
+          `这款豆子已有订单 ${order.code}，为了保留订单追溯，暂时不能删除。`,
+          409,
+        );
+      const skus = await db
+        .prepare('SELECT id FROM bean_skus WHERE bean_id=?')
+        .bind(id)
+        .all<{ id: string }>();
+      const statements = [
+        ...skus.results.map((sku) =>
+          db.prepare('DELETE FROM stock_movements WHERE sku_id=?').bind(sku.id),
+        ),
+        db.prepare('DELETE FROM profiles WHERE bean_id=?').bind(id),
+        db.prepare('DELETE FROM bean_skus WHERE bean_id=?').bind(id),
+        db.prepare('DELETE FROM beans WHERE id=?').bind(id),
+      ];
+      const results = await db.batch(statements);
+      if (!results.at(-1)?.meta.changes) throw new InputError('豆子档案不存在。', 404);
+      return json({ id });
+    }
+    throw new InputError('这个档案暂不支持删除。', 404);
+  } catch (e) {
+    return failure(e);
+  }
+}

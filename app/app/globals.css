@@ -1646,6 +1646,9 @@ h2 {
   background: #fffaf0;
   border-color: #e9dfc6;
 }
+.operation-stat:is(button) { width: 100%; text-align: left; cursor: pointer; font: inherit; }
+.operation-stat:is(button):hover, .operation-stat.active { border-color: #7c9998; box-shadow: 0 0 0 3px rgb(124 153 152 / 12%); }
+.operation-stat.active { background: #f1f6f5; }
 .operation-heading > div:first-child p {
   color: #8b968b;
   font-size: 11px;
@@ -2513,6 +2516,9 @@ h1 { font-size: 35px; font-weight: 600; letter-spacing: -1.3px; }
 .sheet-header p { margin: 0; color: #748488; font-size: 12px; line-height: 1.5; }
 .sheet-close { position: absolute; z-index: 20; top: 10px; right: 10px; display: grid; width: 40px; height: 40px; place-items: center; padding: 0; color: #3f565a; background: #edf2f2; border: 1px solid #d5e0e0; border-radius: 10px; cursor: pointer; }
 .sheet-close:hover { background: #dfe9e9; }
+.archive-form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+.archive-delete { color: #a53737 !important; background: #fff3f2 !important; border-color: #efcbc9 !important; }
+.primary-action, .primary-action svg { color: #ffffff !important; }
 .roast-dialog [data-slot='dialog-title'] { font-size: 19px; }
 .roast-dialog [data-slot='dialog-description'] { font-size: 12px; line-height: 1.5; }
 .roast-dialog form { gap: 14px; }
