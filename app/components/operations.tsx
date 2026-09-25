@@ -77,6 +77,8 @@ type RoastSession = {
   machine: string;
   records: RecordedPoint[];
   target: ConfirmedTarget;
+  /** A session exists only after the beans have actually entered the roaster. */
+  isRecording?: true;
 };
 
 const roastTargets = [
@@ -215,11 +217,32 @@ export default function OperationsPanel({
 
   function resumeBatch(orders: RoastOrder[]) {
     const key = orders.map((order) => order.id).join('-');
-    const session = roastSessions[key];
+    const stored = roastSessions[key];
+    // Older versions saved a timer as soon as the console was opened.  That can
+    // make a preparation screen look as if it has been roasting for hours.
+    // Only sessions explicitly marked as recording are allowed to continue.
+    const session = stored?.isRecording === true &&
+      Number.isFinite(stored.startedAt) &&
+      stored.startedAt <= Date.now() &&
+      Date.now() - stored.startedAt <= 3 * 60 * 60 * 1000
+      ? stored
+      : undefined;
+    if (stored && !session) {
+      setRoastSessions((current) => {
+        const next = { ...current };
+        delete next[key];
+        try {
+          window.localStorage.setItem('penguin-roast-sessions', JSON.stringify(next));
+        } catch {
+          // A stale local timer must never block a new physical roast.
+        }
+        return next;
+      });
+    }
     setRoastBatch({
       key,
       orders,
-      startedAt: session?.startedAt || Date.now(),
+      startedAt: session?.startedAt ?? null,
       machine: session?.machine || roastProgress[key]?.machine || 'Sandouke 600',
       session,
     });
@@ -240,7 +263,8 @@ export default function OperationsPanel({
   async function beginBatch(chargedGrams: number, machine: string, draft: Omit<RoastSession, 'startedAt' | 'machine'>) {
     if (!roastBatch) return null;
     const startedAt = Date.now();
-    const ok = await mutate(
+    const alreadyRoasting = roastBatch.orders.every((order) => order.status === 'roasting');
+    const ok = alreadyRoasting || await mutate(
       { kind: 'batch-status', id: roastBatch.orders[0].id, ids: roastBatch.orders.map((order) => order.id), status: 'roasting' },
       `已开始 ${roastBatch.orders.length} 张合并订单`,
     );
@@ -259,7 +283,7 @@ export default function OperationsPanel({
       }
       return next;
     });
-    const session = { ...draft, startedAt, machine };
+    const session = { ...draft, startedAt, machine, isRecording: true as const };
     saveSession(roastBatch.key, session);
     setRoastBatch((current) => current ? { ...current, startedAt, machine, session } : current);
     return startedAt;
