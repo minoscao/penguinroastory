@@ -1267,6 +1267,18 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
         }}
       >
         <DialogContent
+          key={
+            modal
+              ? modal.type + '-' +
+                ('record' in modal && modal.record
+                  ? modal.record.id
+                  : 'id' in modal
+                    ? modal.id
+                    : 'bean' in modal
+                      ? modal.bean.id
+                      : 'new')
+              : 'closed'
+          }
           className={
             'roast-dialog ' +
             (modal?.type === 'profile' || modal?.type === 'detail'

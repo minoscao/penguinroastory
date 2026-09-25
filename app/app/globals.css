@@ -2505,7 +2505,7 @@ h1 { font-size: 35px; font-weight: 600; letter-spacing: -1.3px; }
 .bean-card-body { padding: 14px 15px; }
 .coffee-photo { aspect-ratio: 2.4/1; }
 /* Routine additions and edits stay in a narrow side sheet, so list context remains visible. */
-.roast-dialog:not(.roast-console-dialog) { top: 0 !important; right: 0 !important; left: auto !important; width: min(540px, 100vw) !important; max-width: 100vw !important; height: 100dvh !important; max-height: 100dvh !important; padding: 22px !important; overflow-y: auto !important; border-radius: 0 !important; transform: none !important; translate: none !important; box-shadow: -18px 0 42px rgb(31 48 52 / 14%); }
+.roast-dialog:not(.roast-console-dialog) { inset: 0 0 0 auto !important; top: 0 !important; right: 0 !important; bottom: 0 !important; left: auto !important; width: min(540px, 100vw) !important; max-width: 100vw !important; height: 100dvh !important; max-height: 100dvh !important; margin: 0 !important; padding: 22px !important; overflow-y: auto !important; overscroll-behavior: contain; border-radius: 0 !important; --tw-translate-x: 0px !important; --tw-translate-y: 0px !important; transform: none !important; translate: 0 0 !important; box-shadow: -18px 0 42px rgb(31 48 52 / 14%); }
 .roast-dialog.wide-dialog:not(.roast-console-dialog) { width: min(680px, 100vw) !important; }
 .roast-dialog [data-slot='dialog-title'] { font-size: 19px; }
 .roast-dialog [data-slot='dialog-description'] { font-size: 12px; line-height: 1.5; }
