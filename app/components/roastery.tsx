@@ -1267,6 +1267,7 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
         }}
       >
         <DialogContent
+          showCloseButton={false}
           key={
             modal
               ? modal.type + '-' +
@@ -1286,6 +1287,17 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
               : '')
           }
         >
+          <button
+            type="button"
+            className="sheet-close"
+            aria-label="关闭窗口"
+            onClick={() => {
+              setModal(null);
+              setFormError('');
+            }}
+          >
+            <X size={20} />
+          </button>
           <DialogHeader>
             <DialogTitle>
               {modal?.type === 'customer'
@@ -1308,8 +1320,9 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                         ? '新建烘焙订单'
                         : '订单详情'}
             </DialogTitle>
-            <DialogDescription>
-              {modal?.type === 'order'
+            {modal?.type !== 'customer' && modal?.type !== 'bean' && modal?.type !== 'detail' && (
+              <DialogDescription>
+                {modal?.type === 'order'
                 ? '选好客户、豆子和方案，安排这次烘焙。'
                 : modal?.type === 'sku'
                   ? '为这款豆子登记到货批次和入库重量。'
@@ -1317,10 +1330,9 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                   ? '记录你自己的目标参数。保存方案不会更改历史订单。'
                   : modal?.type === 'profiles'
                     ? '同一款豆子，可以保存不同的烘焙方案。'
-                    : modal?.type === 'detail'
-                      ? '从开始到完成，留下这张订单的烘焙记录。'
-                      : '先记录必要信息，其他内容可以随时补充。'}
-            </DialogDescription>
+                    : ''}
+              </DialogDescription>
+            )}
           </DialogHeader>
           {formError && (
             <div role="alert" className="form-error">
