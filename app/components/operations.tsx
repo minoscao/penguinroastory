@@ -209,16 +209,16 @@ export default function OperationsPanel({
     }
   }
 
-  async function startBatch(orders: RoastOrder[]) {
+  const startBatch = useCallback((orders: RoastOrder[]) => {
     setRoastBatch({
       key: orders.map((order) => order.id).join('-'),
       orders,
       startedAt: null,
       machine: 'Sandouke 600',
     });
-  }
+  }, []);
 
-  function resumeBatch(orders: RoastOrder[]) {
+  const resumeBatch = useCallback((orders: RoastOrder[]) => {
     const key = orders.map((order) => order.id).join('-');
     const stored = roastSessions[key];
     // Older versions saved a timer as soon as the console was opened.  That can
@@ -249,7 +249,39 @@ export default function OperationsPanel({
       machine: session?.machine || roastProgress[key]?.machine || 'Sandouke 600',
       session,
     });
-  }
+  }, [roastProgress, roastSessions]);
+
+  useEffect(() => {
+    if (view !== 'roasting' || !data || roastBatch) return;
+    const orderId = new URLSearchParams(window.location.search).get('order');
+    if (!orderId) return;
+
+    // The order archive can send a roaster directly to the recording console.
+    // Clear the hand-off address immediately so closing the console returns to
+    // the normal board instead of opening it again.
+    window.history.replaceState({}, '', window.location.pathname);
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      const order = data.active_orders.find((item) => item.id === orderId);
+      if (!order) {
+        setError('这张订单已经不在等待或烘焙中，无法打开烘焙记录台。');
+        return;
+      }
+      const otherRoast = data.active_orders.find(
+        (item) => item.status === 'roasting' && item.id !== order.id,
+      );
+      if (otherRoast) {
+        setError(`Sandouke 600 正在烘焙 ${otherRoast.code}，请结束当前这一锅后再开始。`);
+        return;
+      }
+      if (order.status === 'roasting') resumeBatch([order]);
+      else startBatch([order]);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [data, roastBatch, resumeBatch, startBatch, view]);
 
   const saveSession = useCallback((key: string, session: RoastSession) => {
     setRoastSessions((current) => {
@@ -421,7 +453,7 @@ function RoastingBoard({
   mode: 'bean' | 'customer';
   setMode: (mode: 'bean' | 'customer') => void;
   busy: boolean;
-  startBatch: (orders: RoastOrder[]) => Promise<void>;
+  startBatch: (orders: RoastOrder[]) => void;
   resumeBatch: (orders: RoastOrder[]) => void;
   roastProgress: Record<string, RoastProgress>;
 }) {
@@ -711,7 +743,7 @@ function RoastConsole({
       </section>
       <div className="roast-console-footer">
         <span>温度点会按输入第一个数字时的时间写入曲线。</span>
-        <Button className="primary-action" disabled={busy || !started} onClick={finish}><CheckCheck />结束本锅并标记完成</Button>
+        <Button className="primary-action" disabled={busy || !started} onClick={finish}><CheckCheck />结束烘焙，转入待发货</Button>
       </div>
       <Dialog open={chargeSetupOpen} onOpenChange={setChargeSetupOpen}>
         <DialogContent className="charge-setup-dialog">

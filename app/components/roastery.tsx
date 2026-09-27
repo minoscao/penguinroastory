@@ -924,7 +924,7 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                             {o.status === 'waiting'
                               ? '开始烘焙'
                               : o.status === 'roasting'
-                                ? '完成订单'
+                                ? '记录曲线'
                                 : '查看记录'}
                             <ArrowUpRight size={13} />
                           </Button>
@@ -979,7 +979,7 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                   {q || (filter !== 'all' && view === 'orders')
                     ? '试试其他关键词，或切换订单状态。'
                     : view === 'completed'
-                      ? '在订单里标记完成后，就能在这里回看。'
+                      ? '完成烘焙后，就能在这里回看。'
                       : '先记下客户和豆子，再选好烘焙方案。'}
                 </p>
                 {!q && filter === 'all' && view === 'orders' && (
@@ -1409,8 +1409,6 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
             <OrderDetail
               id={modal.id}
               revision={revision}
-              busy={busy}
-              mutate={mutate}
             />
           )}
           </dialog>
@@ -2013,13 +2011,9 @@ function OrderForm({
 function OrderDetail({
   id,
   revision,
-  busy,
-  mutate,
 }: {
   id: string;
   revision: number;
-  busy: boolean;
-  mutate: Mutate;
 }) {
   const [data, setData] = useState<{
       order: RoastOrder;
@@ -2095,7 +2089,7 @@ function OrderDetail({
                   ? '订单创建'
                   : s === 'roasting'
                     ? '开始烘焙'
-                    : '完成交付'}
+                    : '烘焙完成'}
               </strong>
               <small>{event ? stamp(event.occurred_at) : '尚未完成'}</small>
             </div>
@@ -2106,44 +2100,32 @@ function OrderDetail({
         {o.status === 'completed' ? (
           <p>
             <CheckCheck size={18} />
-            这张订单已完成，并已归入“已完成订单”。
+            这张订单的烘焙已经完成；发货请到“发货工作台”登记。
           </p>
         ) : (
           <>
             <p>
               {o.status === 'waiting'
-                ? '准备好了，就开始这张订单的烘焙。'
-                : '确认烘焙及交付已完成后，再标记完成。'}
+                ? '先进入烘焙记录台，确认入豆资料后开始记录实际曲线。'
+                : '这锅正在进行，请回到烘焙记录台继续记录曲线。'}
             </p>
             <Button
               className="primary-action"
-              disabled={busy}
               onClick={() =>
-                mutate(
-                  'PATCH',
-                  {
-                    kind: 'status',
-                    id: o.id,
-                    status: o.status === 'waiting' ? 'roasting' : 'completed',
-                  },
-                  o.status === 'waiting'
-                    ? '订单已开始烘焙'
-                    : '订单已完成，已记录交付',
-                  false,
+                window.location.assign(
+                  '/roasting?order=' + encodeURIComponent(o.id),
                 )
               }
             >
-              {busy ? (
-                '正在保存…'
-              ) : o.status === 'waiting' ? (
+              {o.status === 'waiting' ? (
                 <>
                   <Flame size={16} />
-                  开始烘焙
+                  进入烘焙记录台
                 </>
               ) : (
                 <>
-                  <CheckCheck size={16} />
-                  标记完成 / 已交付
+                  <Flame size={16} />
+                  继续记录曲线
                 </>
               )}
             </Button>
