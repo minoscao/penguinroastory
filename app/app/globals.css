@@ -2253,13 +2253,15 @@ h1 { font-size: 35px; font-weight: 600; letter-spacing: -1.3px; }
   height: 100dvh;
   max-height: none;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 34px clamp(22px, 4vw, 68px) !important;
   border: 0 !important;
   border-radius: 0 !important;
   background: #f7f9f9;
 }
 
-.roast-console { width: min(1280px, 100%); min-height: calc(100dvh - 68px); margin: 0 auto; display: grid; align-content: center; gap: 20px; }
+.roast-console { width: min(1280px, 100%); min-height: calc(100dvh - 68px); margin: 0 auto; padding-bottom: 34px; display: grid; align-content: start; gap: 20px; }
+.roast-console > [data-slot='dialog-header'] { position: sticky; top: -34px; z-index: 2; padding: 34px 0 14px; margin-bottom: -14px; background: #f7f9f9; }
 .roast-console-title {
   display: flex;
   align-items: center;
@@ -2373,6 +2375,7 @@ h1 { font-size: 35px; font-weight: 600; letter-spacing: -1.3px; }
 
 @media (max-width: 760px) {
   .roast-console-dialog { padding: 20px !important; }
+  .roast-console > [data-slot='dialog-header'] { top: -20px; padding-top: 20px; }
   .roast-console-title, .roast-console-footer { align-items: flex-start; flex-direction: column; }
   .roast-controls { grid-template-columns: 1fr; }
   .roast-clock { min-width: 0; }

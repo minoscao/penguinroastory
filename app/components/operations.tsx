@@ -698,10 +698,10 @@ function RoastConsole({
           <div><span className="curve-legend actual" />本次实际曲线</div>
         </div>
         <ChartContainer config={{ plan: { label: '方案豆温', color: '#82979b' }, actual: { label: '本次豆温', color: '#d2763c' } }} className="live-curve-chart">
-          <LineChart data={chartData} margin={{ top: 16, right: 18, bottom: 4, left: -16 }}>
+          <LineChart data={chartData} margin={{ top: 16, right: 18, bottom: 4, left: 4 }}>
             <CartesianGrid vertical={false} stroke="#e2e8e8" />
             <XAxis dataKey="seconds" type="number" domain={[0, chartEnd]} tickFormatter={formatSeconds} tickLine={false} axisLine={false} minTickGap={32} />
-            <YAxis domain={[0, 230]} tickFormatter={(value) => value + '°'} tickLine={false} axisLine={false} width={38} />
+            <YAxis domain={[0, 230]} tickFormatter={(value) => value + '°'} tickLine={false} axisLine={false} width={46} />
             <Tooltip labelFormatter={(value) => formatSeconds(Number(value))} formatter={(value, name) => [String(value) + ' ℃', name === 'plan' ? '方案豆温' : '本次豆温']} />
             <Line type="linear" dataKey="plan" name="plan" stroke="#82979b" strokeWidth={2} strokeDasharray="5 5" dot={false} isAnimationActive={false} connectNulls />
             <Line type="linear" dataKey="actual" name="actual" stroke="#d2763c" strokeWidth={3} dot={{ r: 4, fill: '#fff', stroke: '#d2763c', strokeWidth: 2 }} activeDot={{ r: 6 }} isAnimationActive={false} connectNulls />
