@@ -282,7 +282,7 @@ function Curve({ points }: { points: Point[] }) {
       <div className="curve-heading">
         <span>
           <span className="curve-dot" />
-          目标豆温曲线
+          理想参考曲线
         </span>
         <small>计划参数 · 非机器实时采集</small>
       </div>
@@ -325,6 +325,63 @@ function Curve({ points }: { points: Point[] }) {
         </LineChart>
       </ChartContainer>
     </div>
+  );
+}
+
+function ProfileDraftCurve({ points }: { points: Point[] }) {
+  const chartEnd = Math.max(...points.map((point) => point.seconds), 60);
+  const chartMax = Math.max(
+    220,
+    ...points.map((point) => point.temperature),
+  );
+  if (points.length < 2)
+    return (
+      <div className="profile-poster-empty">
+        填写入豆、回温、一爆或出豆的时间与温度，理想曲线会在这里出现。
+      </div>
+    );
+  return (
+    <ChartContainer
+      config={{ temperature: { label: '理想豆温', color: '#c96d35' } }}
+      className="profile-poster-chart"
+    >
+      <LineChart
+        accessibilityLayer
+        data={points}
+        margin={{ top: 16, right: 18, bottom: 4, left: -12 }}
+      >
+        <CartesianGrid vertical={false} stroke="#e8e5da" />
+        <XAxis
+          dataKey="seconds"
+          type="number"
+          domain={[0, chartEnd]}
+          tickFormatter={timeLabel}
+          tickLine={false}
+          axisLine={false}
+          minTickGap={28}
+        />
+        <YAxis
+          domain={[0, Math.ceil((chartMax + 10) / 10) * 10]}
+          tickFormatter={(value) => value + '°'}
+          tickLine={false}
+          axisLine={false}
+          width={42}
+        />
+        <Tooltip
+          labelFormatter={(value) => timeLabel(Number(value))}
+          formatter={(value) => [String(value) + ' ℃', '理想豆温']}
+        />
+        <Line
+          type="linear"
+          dataKey="temperature"
+          stroke="#c96d35"
+          strokeWidth={3}
+          dot={{ r: 4, fill: '#fffdf9', stroke: '#c96d35', strokeWidth: 2 }}
+          activeDot={{ r: 6 }}
+          isAnimationActive={false}
+        />
+      </LineChart>
+    </ChartContainer>
   );
 }
 function ProfileSummary({ profile }: { profile: Profile }) {
@@ -1055,6 +1112,7 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                         <h2>{b.name}</h2>
                         <div className="chips">
                           <span>{b.process || '处理法待补充'}</span>
+                          {b.altitude && <span>海拔 {b.altitude}</span>}
                           {b.variety && <span>{b.variety}</span>}
                         </div>
                         <p className="catalog-notes">
@@ -1090,7 +1148,7 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                     </article>
                   ))}
                 {catalog.beans.filter((b) =>
-                  (b.name + b.origin + b.process + b.variety + b.notes)
+                  (b.name + b.origin + b.process + b.altitude + b.variety + b.notes)
                     .toLowerCase()
                     .includes(q.toLowerCase()),
                 ).length === 0 && (
@@ -1576,6 +1634,14 @@ function CatalogForm({
                 placeholder="水洗、日晒、蜜处理…"
               />
             </Field>
+            <Field label="海拔">
+              <Input
+                name="altitude"
+                maxLength={80}
+                defaultValue={bean?.altitude}
+                placeholder="例如：1900–2200m"
+              />
+            </Field>
             <Field label="品种" wide>
               <Input
                 name="variety"
@@ -1636,6 +1702,40 @@ type DraftPoint = {
   power: string;
   fan: string;
 };
+
+const profileStages = [
+  { stage: '入豆', label: '入豆温度', hint: '开始点 · 固定为 0:00' },
+  { stage: '回温', label: '回温点', hint: '豆温最低点' },
+  { stage: '转黄', label: '转黄 / 开风门', hint: '脱水结束参考' },
+  { stage: '一爆', label: '一爆开始', hint: '发展阶段起点' },
+  { stage: '二爆', label: '二爆开始', hint: '浅烘焙可留空' },
+  { stage: '出豆', label: '出豆温度', hint: '这一锅的终点' },
+] as const;
+
+const profileStageAliases: Record<string, string[]> = {
+  入豆: ['入豆', '准备入豆', '投豆'],
+  回温: ['回温'],
+  转黄: ['转黄', '转黄 / 开风门', '转黄/开风门'],
+  一爆: ['一爆', '一爆开始'],
+  二爆: ['二爆', '二爆开始'],
+  出豆: ['出豆', '下豆'],
+};
+
+function profileDraft(profile?: Profile): DraftPoint[] {
+  return profileStages.map((definition, index) => {
+    const saved = profile?.points.find((point) =>
+      profileStageAliases[definition.stage].includes(point.stage.trim()),
+    );
+    return {
+      stage: definition.stage,
+      time: saved ? timeLabel(saved.seconds) : index === 0 ? '0:00' : '',
+      temperature: saved ? String(saved.temperature) : '',
+      power: saved ? String(saved.power) : '',
+      fan: saved ? String(saved.fan) : '',
+    };
+  });
+}
+
 function ProfileForm({
   bean,
   profile,
@@ -1649,23 +1749,7 @@ function ProfileForm({
   mutate: Mutate;
   onBack: () => void;
 }) {
-  const [points, setPoints] = useState<DraftPoint[]>(
-    profile
-      ? profile.points.map((p) => ({
-          stage: p.stage,
-          time: timeLabel(p.seconds),
-          temperature: String(p.temperature),
-          power: String(p.power),
-          fan: String(p.fan),
-        }))
-      : ['入豆', '回温', '转黄', '一爆', '下豆'].map((stage, i) => ({
-          stage,
-          time: i === 0 ? '0:00' : '',
-          temperature: '',
-          power: '',
-          fan: '',
-        })),
-  );
+  const [points, setPoints] = useState<DraftPoint[]>(() => profileDraft(profile));
   const [error, setError] = useState('');
   function seconds(time: string) {
     if (!/^\d{1,3}:[0-5]\d$/.test(time))
@@ -1673,11 +1757,42 @@ function ProfileForm({
     const [m, s] = time.split(':').map(Number);
     return m * 60 + s;
   }
+  const previewPoints = points.flatMap((point) => {
+    if (!/^\d{1,3}:[0-5]\d$/.test(point.time)) return [];
+    const temperature = Number(point.temperature);
+    if (!Number.isFinite(temperature) || temperature < 0 || temperature > 350)
+      return [];
+    return [
+      {
+        stage: point.stage,
+        seconds: seconds(point.time),
+        temperature,
+        power: Number(point.power) || 0,
+        fan: Number(point.fan) || 0,
+      },
+    ];
+  });
   async function submit(e: SyntheticEvent<HTMLFormElement>) {
     e.preventDefault();
     setError('');
     try {
       const data = Object.fromEntries(new FormData(e.currentTarget));
+      const used = points.filter((point) =>
+        [point.time, point.temperature, point.power, point.fan].some((value) =>
+          value.trim(),
+        ),
+      );
+      const incomplete = used.find((point) =>
+        [point.time, point.temperature, point.power, point.fan].some(
+          (value) => !value.trim(),
+        ),
+      );
+      if (incomplete)
+        throw new Error(`请补齐「${incomplete.stage}」的时间、温度、火力和风门。`);
+      if (!used.some((point) => point.stage === '入豆'))
+        throw new Error('请填写入豆温度，作为理想曲线的开始点。');
+      if (!used.some((point) => point.stage === '出豆'))
+        throw new Error('请填写出豆温度，作为理想曲线的终点。');
       await mutate(
         profile ? 'PATCH' : 'POST',
         {
@@ -1685,7 +1800,7 @@ function ProfileForm({
           kind: 'profile',
           bean_id: bean.id,
           batch_grams: Math.round(Number(data.batch_g)),
-          points: points.map((p) => ({
+          points: used.map((p) => ({
             stage: p.stage,
             seconds: seconds(p.time),
             temperature: p.temperature,
@@ -1753,92 +1868,75 @@ function ProfileForm({
         </Field>
         <div className="field-wide">
           <div className="section-label">
-            <h3>曲线关键点</h3>
+            <h3>理想烘焙曲线</h3>
             <span>时间格式：分:秒，如 1:30</span>
           </div>
           <p className="hint">
-            按你的设备填写目标豆温、火力和风门。首点为 0:00，其余时间依次增加。
+            按烘焙阶段填写你想要的豆温、火力和风门。入豆与出豆必填；二爆等没有发生的阶段可以留空。
           </p>
-          <div className="point-editor">
-            <div className="point-editor-head">
-              <span>阶段</span>
-              <span>时间</span>
-              <span>豆温 ℃</span>
-              <span>火力 %</span>
-              <span>风门 %</span>
-              <span />
-            </div>
-            {points.map((p, i) => (
-              <div className="point-row" key={i}>
-                {(
-                  ['stage', 'time', 'temperature', 'power', 'fan'] as const
-                ).map((k) => (
-                  <Input
-                    key={k}
-                    aria-label={
-                      '第' +
-                      (i + 1) +
-                      '点' +
-                      {
-                        stage: '阶段',
-                        time: '时间',
-                        temperature: '豆温',
-                        power: '火力',
-                        fan: '风门',
-                      }[k]
-                    }
-                    required
-                    maxLength={k === 'stage' ? 30 : undefined}
-                    type={
-                      ['temperature', 'power', 'fan'].includes(k)
-                        ? 'number'
-                        : 'text'
-                    }
-                    min="0"
-                    max={k === 'temperature' ? 350 : 100}
-                    step="0.1"
-                    pattern={k === 'time' ? '[0-9]{1,3}:[0-5][0-9]' : undefined}
-                    placeholder={k === 'time' ? '1:30' : undefined}
-                    value={p[k]}
-                    onChange={(e) =>
-                      setPoints((items) =>
-                        items.map((x, index) =>
-                          index === i ? { ...x, [k]: e.target.value } : x,
-                        ),
-                      )
-                    }
-                  />
-                ))}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={'删除第' + (i + 1) + '个点'}
-                  disabled={points.length <= 2}
-                  onClick={() =>
-                    setPoints((items) => items.filter((_, j) => j !== i))
-                  }
-                >
-                  <X size={14} />
-                </Button>
+          <section className="profile-poster" aria-label="理想烘焙曲线预览">
+            <div className="profile-poster-head">
+              <div>
+                <span>IDEAL ROAST PROFILE</span>
+                <strong>{profile?.name || '未命名烘焙方案'}</strong>
               </div>
-            ))}
+              <small>保存后会叠加在烘焙工作台，供本锅实时参考</small>
+            </div>
+            <ProfileDraftCurve points={previewPoints} />
+            <div className="profile-poster-stages">
+              {previewPoints.map((point) => (
+                <span key={point.stage}>
+                  <strong>{point.stage}</strong>
+                  {timeLabel(point.seconds)} · {point.temperature} ℃
+                </span>
+              ))}
+            </div>
+          </section>
+          <div className="profile-stage-editor">
+            {points.map((point, index) => {
+              const definition = profileStages[index];
+              return (
+                <article className="profile-stage-row" key={point.stage}>
+                  <div className="profile-stage-name">
+                    <span>{String(index + 1).padStart(2, '0')}</span>
+                    <strong>{definition.stage}</strong>
+                    <small>{definition.label} · {definition.hint}</small>
+                  </div>
+                  {(
+                    [
+                      ['time', '时间', '1:30'],
+                      ['temperature', '豆温 ℃', '例如 198'],
+                      ['power', '火力 %', '例如 60'],
+                      ['fan', '风门 %', '例如 40'],
+                    ] as const
+                  ).map(([key, label, placeholder]) => (
+                    <label key={key}>
+                      <span>{label}</span>
+                      <Input
+                        aria-label={`${definition.stage}${label}`}
+                        type={key === 'time' ? 'text' : 'number'}
+                        min="0"
+                        max={key === 'temperature' ? 350 : 100}
+                        step="0.1"
+                        pattern={key === 'time' ? '[0-9]{1,3}:[0-5][0-9]' : undefined}
+                        placeholder={placeholder}
+                        value={point[key]}
+                        onChange={(event) =>
+                          setPoints((items) =>
+                            items.map((item, itemIndex) =>
+                              itemIndex === index
+                                ? { ...item, [key]: event.target.value }
+                                : item,
+                            ),
+                          )
+                        }
+                      />
+                    </label>
+                  ))}
+                </article>
+              );
+            })}
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={points.length >= 30}
-            onClick={() =>
-              setPoints((p) => [
-                ...p,
-                { stage: '', time: '', temperature: '', power: '', fan: '' },
-              ])
-            }
-          >
-            <Plus size={14} />
-            增加一个记录点
-          </Button>
         </div>
         <Field label="方案备注" wide>
           <Textarea

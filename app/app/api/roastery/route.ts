@@ -252,13 +252,14 @@ export async function POST(request: Request) {
       const x = beanInput(b);
       await db
         .prepare(
-          'INSERT INTO beans(id,name,origin,process,variety,notes,image_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)',
+          'INSERT INTO beans(id,name,origin,process,altitude,variety,notes,image_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)',
         )
         .bind(
           id,
           x.name,
           x.origin,
           x.process,
+          x.altitude,
           x.variety,
           x.notes,
           x.image_key,
@@ -527,12 +528,13 @@ export async function PATCH(request: Request) {
       const x = beanInput(b);
       const r = await db
         .prepare(
-          'UPDATE beans SET name=?,origin=?,process=?,variety=?,notes=?,image_key=?,updated_at=? WHERE id=?',
+          'UPDATE beans SET name=?,origin=?,process=?,altitude=?,variety=?,notes=?,image_key=?,updated_at=? WHERE id=?',
         )
         .bind(
           x.name,
           x.origin,
           x.process,
+          x.altitude,
           x.variety,
           x.notes,
           x.image_key,

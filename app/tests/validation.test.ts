@@ -31,6 +31,10 @@ void test('个人和企业客户分别保存，旧档案类型不擅自推断', 
     beanInput({ name: '花香豆子', image_key: 'floral' }).image_key,
     'floral',
   );
+  assert.equal(
+    beanInput({ name: '花香豆子', altitude: '1900–2200m' }).altitude,
+    '1900–2200m',
+  );
   assert.throws(() =>
     beanInput({ name: '豆子', image_key: 'https://untrusted.example/image' }),
   );

@@ -24,6 +24,7 @@ export const beans = sqliteTable('beans', {
   name: text('name').notNull(),
   origin: text('origin').notNull().default(''),
   process: text('process').notNull().default(''),
+  altitude: text('altitude').notNull().default(''),
   variety: text('variety').notNull().default(''),
   notes: text('notes').notNull().default(''),
   created_at: text('created_at').notNull(),

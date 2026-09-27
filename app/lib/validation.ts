@@ -91,6 +91,7 @@ export function beanInput(v: unknown) {
     name: text(b.name, '豆子名称', 100, true),
     origin: text(b.origin, '产地', 100),
     process: text(b.process, '处理法', 100),
+    altitude: text(b.altitude, '海拔', 80),
     variety: text(b.variety, '品种', 100),
     notes: text(b.notes, '风味与备注', 2000),
   };

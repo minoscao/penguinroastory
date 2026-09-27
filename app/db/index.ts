@@ -7,6 +7,7 @@ async function upgradeCatalog(db: D1Database) {
     ['customers', 'is_demo', 'INTEGER NOT NULL DEFAULT 0'],
     ['beans', 'image_key', "TEXT NOT NULL DEFAULT ''"],
     ['beans', 'is_demo', 'INTEGER NOT NULL DEFAULT 0'],
+    ['beans', 'altitude', "TEXT NOT NULL DEFAULT ''"],
     ['profiles', 'is_demo', 'INTEGER NOT NULL DEFAULT 0'],
     ['orders', 'is_demo', 'INTEGER NOT NULL DEFAULT 0'],
     ['orders', 'sku_id', "TEXT NOT NULL DEFAULT ''"],

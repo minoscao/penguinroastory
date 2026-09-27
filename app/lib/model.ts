@@ -21,6 +21,7 @@ export type Bean = {
   name: string;
   origin: string;
   process: string;
+  altitude: string;
   variety: string;
   notes: string;
   created_at: string;
