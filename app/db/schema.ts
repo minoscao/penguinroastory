@@ -105,6 +105,7 @@ export const orders = sqliteTable(
     created_at: text('created_at').notNull(),
     started_at: text('started_at'),
     completed_at: text('completed_at'),
+    roast_record: text('roast_record').notNull().default(''),
     updated_at: text('updated_at').notNull(),
     last_transition_id: text('last_transition_id'),
   },

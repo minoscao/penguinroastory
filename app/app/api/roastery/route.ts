@@ -11,6 +11,7 @@ import {
   orderInput,
   inventoryInput,
   shipmentInput,
+  roastRecordInput,
   nextStatus,
 } from '@/lib/validation';
 import type { Profile } from '@/lib/model';
@@ -37,6 +38,10 @@ function decodeOrder(row: Record<string, unknown>) {
     batch_count: Number(row.batch_count || 1),
     stock_deducted_grams: Number(row.stock_deducted_grams || 0),
     profile_snapshot: JSON.parse(String(row.profile_snapshot)),
+    roast_record:
+      typeof row.roast_record === 'string' && row.roast_record
+        ? JSON.parse(row.roast_record)
+        : null,
   };
 }
 function failure(e: unknown) {
@@ -442,8 +447,30 @@ export async function PATCH(request: Request) {
   try {
     const b = await body(request);
     const db = await getD1();
-    const id = text(b.id, '记录', 80, true);
     const now = new Date().toISOString();
+    if (b.kind === 'roast-record') {
+      const x = roastRecordInput(b);
+      const rows = await db
+        .prepare(
+          'SELECT id FROM orders WHERE id IN (' + x.ids.map(() => '?').join(',') + ')',
+        )
+        .bind(...x.ids)
+        .all<{ id: string }>();
+      if (rows.results.length !== x.ids.length)
+        throw new InputError('有订单不存在，无法保存这锅的曲线。', 404);
+      const payload = JSON.stringify(x.record);
+      const results = await db.batch(
+        x.ids.map((orderId) =>
+          db
+            .prepare('UPDATE orders SET roast_record=?,updated_at=? WHERE id=?')
+            .bind(payload, now, orderId),
+        ),
+      );
+      if (!results.every((result) => result.meta.changes))
+        throw new InputError('曲线记录已变化，请刷新后再保存。', 409);
+      return json({ updated: x.ids.length });
+    }
+    const id = text(b.id, '记录', 80, true);
     if (b.kind === 'shipment-status') {
       const target = text(b.status, '物流状态', 20, true);
       if (target !== 'delivered') throw new InputError('物流状态无效。');

@@ -13,6 +13,7 @@ async function upgradeCatalog(db: D1Database) {
     ['orders', 'sku_snapshot', 'TEXT'],
     ['orders', 'batch_count', 'INTEGER NOT NULL DEFAULT 1'],
     ['orders', 'stock_deducted_grams', 'INTEGER NOT NULL DEFAULT 0'],
+    ['orders', 'roast_record', "TEXT NOT NULL DEFAULT ''"],
   ];
   for (const [table, column, definition] of additions) {
     const info = await db

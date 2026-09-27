@@ -38,6 +38,8 @@ import type {
   BeanSku,
   Catalog,
   Profile,
+  RoastRecord,
+  RoastRecordPoint,
   RoastOrder,
   Shipment,
   StockMovement,
@@ -51,12 +53,7 @@ type RoastBatch = {
   session?: RoastSession;
 };
 
-type RecordedPoint = {
-  stage: string;
-  seconds: number;
-  temperature: number;
-  fan?: number;
-};
+type RecordedPoint = RoastRecordPoint;
 
 type RoastProgress = {
   chargedGrams: number;
@@ -64,20 +61,9 @@ type RoastProgress = {
   machine: string;
 };
 
-type ConfirmedTarget = {
-  temperature: string;
-  label: string;
-  level: string;
-  machine: string;
-  profileId?: string;
-  profileName?: string;
-};
+type ConfirmedTarget = RoastRecord['target'];
 
-type RoastSession = {
-  startedAt: number;
-  machine: string;
-  records: RecordedPoint[];
-  target: ConfirmedTarget;
+type RoastSession = RoastRecord & {
   /** A session exists only after the beans have actually entered the roaster. */
   isRecording?: true;
 };
@@ -263,9 +249,39 @@ export default function OperationsPanel({
     let cancelled = false;
     queueMicrotask(() => {
       if (cancelled) return;
-      const order = data.active_orders.find((item) => item.id === orderId);
+      const order = [...data.active_orders, ...data.completed_orders].find((item) => item.id === orderId);
       if (!order) {
-        setError('这张订单已经不在等待或烘焙中，无法打开烘焙记录台。');
+        setError('没有找到这张订单，无法打开烘焙记录台。');
+        return;
+      }
+      if (order.status === 'completed') {
+        const stored = order.roast_record;
+        const fallbackTarget: ConfirmedTarget = {
+          temperature: String(order.profile_snapshot.points.at(-1)?.temperature || ''),
+          label: '后期补录',
+          level: order.profile_snapshot.roast_level,
+          machine: order.profile_snapshot.machine || 'Sandouke 600',
+          profileId: order.profile_snapshot.id,
+          profileName: order.profile_snapshot.name,
+        };
+        const parsedStartedAt = Date.parse(order.started_at || order.completed_at || '');
+        const session: RoastSession = stored
+          ? { ...stored, isRecording: true }
+          : {
+              startedAt: Number.isFinite(parsedStartedAt) ? parsedStartedAt : Date.now(),
+              machine: fallbackTarget.machine,
+              chargedGrams: 0,
+              target: fallbackTarget,
+              records: [],
+              isRecording: true,
+            };
+        setRoastBatch({
+          key: order.id,
+          orders: [order],
+          startedAt: session.startedAt,
+          machine: session.machine,
+          session,
+        });
         return;
       }
       const otherRoast = data.active_orders.find(
@@ -295,7 +311,7 @@ export default function OperationsPanel({
     });
   }, []);
 
-  async function beginBatch(chargedGrams: number, machine: string, draft: Omit<RoastSession, 'startedAt' | 'machine'>) {
+  async function beginBatch(chargedGrams: number, machine: string, draft: Omit<RoastSession, 'startedAt' | 'machine' | 'chargedGrams' | 'isRecording'>) {
     if (!roastBatch) return null;
     const startedAt = Date.now();
     const alreadyRoasting = roastBatch.orders.every((order) => order.status === 'roasting');
@@ -318,14 +334,33 @@ export default function OperationsPanel({
       }
       return next;
     });
-    const session = { ...draft, startedAt, machine, isRecording: true as const };
+    const session = { ...draft, startedAt, machine, chargedGrams, isRecording: true as const };
     saveSession(roastBatch.key, session);
     setRoastBatch((current) => current ? { ...current, startedAt, machine, session } : current);
     return startedAt;
   }
 
-  async function finishBatch() {
+  async function saveRoastRecord(batch: RoastBatch, session: RoastSession, notice: string) {
+    return mutate(
+      {
+        kind: 'roast-record',
+        ids: batch.orders.map((order) => order.id),
+        record: {
+          startedAt: session.startedAt,
+          machine: session.machine,
+          chargedGrams: session.chargedGrams,
+          target: session.target,
+          records: session.records,
+        },
+      },
+      notice,
+    );
+  }
+
+  async function finishBatch(session: RoastSession) {
     if (!roastBatch) return;
+    const saved = await saveRoastRecord(roastBatch, session, '烘焙曲线已保存');
+    if (!saved) return;
     const ok = await mutate(
       {
         kind: 'batch-status',
@@ -428,6 +463,7 @@ export default function OperationsPanel({
               busy={busy}
               begin={beginBatch}
               finish={finishBatch}
+              saveCorrection={(session) => saveRoastRecord(roastBatch, session, '烘焙曲线已修正')}
               saveSession={saveSession}
               profiles={catalog.profiles.filter((profile) => profile.bean_id === roastBatch.orders[0].bean_id && !profile.id.startsWith('pending-profile-'))}
             />
@@ -536,13 +572,15 @@ function RoastConsole({
   busy,
   begin,
   finish,
+  saveCorrection,
   saveSession,
   profiles,
 }: {
   batch: RoastBatch;
   busy: boolean;
-  begin: (chargedGrams: number, machine: string, draft: Omit<RoastSession, 'startedAt' | 'machine'>) => Promise<number | null>;
-  finish: () => Promise<void>;
+  begin: (chargedGrams: number, machine: string, draft: Omit<RoastSession, 'startedAt' | 'machine' | 'chargedGrams' | 'isRecording'>) => Promise<number | null>;
+  finish: (session: RoastSession) => Promise<void>;
+  saveCorrection: (session: RoastSession) => Promise<boolean>;
   saveSession: (key: string, session: RoastSession) => void;
   profiles: Profile[];
 }) {
@@ -555,6 +593,7 @@ function RoastConsole({
   const [stageRecordOpen, setStageRecordOpen] = useState(false);
   const [chargeTemperature, setChargeTemperature] = useState('');
   const [chargeWeight, setChargeWeight] = useState('');
+  const [chargedGrams, setChargedGrams] = useState(() => batch.session?.chargedGrams || 0);
   const [machine, setMachine] = useState(batch.machine);
   const [targetTemperature, setTargetTemperature] = useState(() => batch.session?.target.temperature || String(profile.points.at(-1)?.temperature || ''));
   const [targetExit, setTargetExit] = useState(() => defaultRoastTarget(profile.roast_level));
@@ -563,14 +602,18 @@ function RoastConsole({
   const [typingStartedAt, setTypingStartedAt] = useState<number | null>(null);
   const [stageTemperature, setStageTemperature] = useState('');
   const [stageTypingStartedAt, setStageTypingStartedAt] = useState<number | null>(null);
-  const [stageFan, setStageFan] = useState<number | null>(null);
+  const [stageFan, setStageFan] = useState('');
+  const [stageTime, setStageTime] = useState('');
+  const [editingRecord, setEditingRecord] = useState<number | null>(null);
   const [records, setRecords] = useState<RecordedPoint[]>(() => batch.session?.records || []);
   const startedAt = batch.startedAt;
+  const reviewMode = batch.orders.every((order) => order.status === 'completed');
 
   useEffect(() => {
+    if (reviewMode) return;
     const timer = window.setInterval(() => setNow(Date.now()), 250);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [reviewMode]);
 
   useEffect(() => {
     if (!startedAt || !confirmedTarget) return;
@@ -578,14 +621,16 @@ function RoastConsole({
       saveSession(batch.key, {
         startedAt,
         machine: confirmedTarget.machine,
+        chargedGrams,
         records,
         target: confirmedTarget,
+        isRecording: true,
       });
     });
-  }, [batch.key, confirmedTarget, records, saveSession, startedAt]);
+  }, [batch.key, chargedGrams, confirmedTarget, records, saveSession, startedAt]);
 
   const started = startedAt !== null;
-  const elapsed = startedAt === null ? 0 : Math.max(0, Math.floor((now - startedAt) / 1000));
+  const elapsed = startedAt === null ? 0 : reviewMode ? Math.max(...records.map((point) => point.seconds), 0) : Math.max(0, Math.floor((now - startedAt) / 1000));
   const recordAt = Math.max(
     0,
     startedAt === null ? 0 : Math.floor(((typingStartedAt || now) - startedAt) / 1000),
@@ -610,7 +655,7 @@ function RoastConsole({
   function addDigit(digit: string) {
     if (!started) return;
     if (!typingStartedAt) setTypingStartedAt(now);
-    setTemperature((value) => (value.length >= 3 ? value : value + digit));
+    setTemperature((value) => appendDecimal(value, digit, 350));
   }
 
   function erase() {
@@ -624,7 +669,7 @@ function RoastConsole({
   function recordTemperature() {
     if (!started) return;
     const value = Number(temperature);
-    if (!Number.isFinite(value) || value < 0 || value > 350) return;
+    if (!isOneDecimal(temperature, 0, 350)) return;
     setRecords((current) => [
       ...current,
       { stage: selectedStage || '即时温度', seconds: recordAt, temperature: value },
@@ -633,28 +678,34 @@ function RoastConsole({
     setTypingStartedAt(null);
   }
 
-  function openStageRecord(stage: string) {
+  function openStageRecord(stage: string, index: number | null = null) {
     setSelectedStage(stage);
     if (!started || stage === '准备入豆') return;
-    setStageTemperature('');
+    const existing = index === null ? null : records[index];
+    setStageTemperature(existing ? decimal(existing.temperature) : '');
     setStageTypingStartedAt(null);
-    setStageFan(null);
+    setStageFan(existing?.fan === undefined ? '' : decimal(existing.fan));
+    setStageTime(existing ? formatSeconds(existing.seconds) : '');
+    setEditingRecord(index);
     setStageRecordOpen(true);
   }
 
   function recordStage() {
     const value = Number(stageTemperature);
-    if (!Number.isFinite(value) || value < 0 || value > 350 || !stageFan) return;
-    const seconds = Math.max(
+    const fan = Number(stageFan);
+    if (!isOneDecimal(stageTemperature, 0, 350) || !isOneDecimal(stageFan, 0, 10)) return;
+    const manuallySetSeconds = stageTime.trim() ? parseSeconds(stageTime) : null;
+    if (stageTime.trim() && manuallySetSeconds === null) return;
+    const seconds = manuallySetSeconds ?? Math.max(
       0,
       startedAt === null
         ? 0
         : Math.floor(((stageTypingStartedAt || now) - startedAt) / 1000),
     );
-    setRecords((current) => [
-      ...current,
-      { stage: selectedStage, seconds, temperature: value, fan: stageFan },
-    ]);
+    const nextPoint = { stage: selectedStage, seconds, temperature: value, fan };
+    setRecords((current) => editingRecord === null
+      ? [...current, nextPoint]
+      : current.map((point, index) => index === editingRecord ? nextPoint : point));
     setStageRecordOpen(false);
   }
 
@@ -669,10 +720,23 @@ function RoastConsole({
     const startedAt = await begin(inputWeight, machine, { records: initialRecords, target: confirmed });
     if (!startedAt) return;
     setNow(startedAt);
+    setChargedGrams(inputWeight);
     setRecords(initialRecords);
     setSelectedStage('回温');
     setConfirmedTarget(confirmed);
     setChargeSetupOpen(false);
+  }
+
+  function sessionForSave(): RoastSession | null {
+    if (!startedAt || !confirmedTarget) return null;
+    return {
+      startedAt,
+      machine: confirmedTarget.machine,
+      chargedGrams,
+      target: confirmedTarget,
+      records,
+      isRecording: true,
+    };
   }
 
   const stages = ['准备入豆', '回温', '转黄 / 开风门', '一爆', '二爆', '出豆'];
@@ -681,14 +745,17 @@ function RoastConsole({
       <DialogHeader>
         <div className="roast-console-title">
           <div>
-            <p>LIVE ROAST CONSOLE</p>
-            <DialogTitle>{batch.orders[0].bean_name} · 本锅烘焙</DialogTitle>
+            <p>{reviewMode ? 'ROAST CURVE REVIEW' : 'LIVE ROAST CONSOLE'}</p>
+            <DialogTitle>{batch.orders[0].bean_name} · {reviewMode ? '烘焙曲线复核' : '本锅烘焙'}</DialogTitle>
             <DialogDescription>
               {confirmedTarget?.profileName || profile.name} · {batch.orders.length} 张订单合并烘焙
             </DialogDescription>
             {confirmedTarget && <span className="confirmed-target">{confirmedTarget.machine} · 目标 {confirmedTarget.temperature} ℃ · {confirmedTarget.label} · {confirmedTarget.level}</span>}
           </div>
-          <div className="roast-clock"><TimerReset size={17} /><strong>{started ? formatSeconds(elapsed) : '待开始'}</strong><span>{started ? '本锅时间' : '填写入豆资料后开始'}</span></div>
+          <div className="roast-head-actions">
+            {!reviewMode && started && <Button className="finish-roast-quick" disabled={busy} onClick={() => { const session = sessionForSave(); if (session) void finish(session); }}><CheckCheck />完成烘焙</Button>}
+            <div className="roast-clock"><TimerReset size={17} /><strong>{started ? formatSeconds(elapsed) : '待开始'}</strong><span>{reviewMode ? '已记录时长' : started ? '本锅时间' : '填写入豆资料后开始'}</span></div>
+          </div>
         </div>
       </DialogHeader>
 
@@ -707,8 +774,13 @@ function RoastConsole({
             <Line type="linear" dataKey="actual" name="actual" stroke="#d2763c" strokeWidth={3} dot={{ r: 4, fill: '#fff', stroke: '#d2763c', strokeWidth: 2 }} activeDot={{ r: 6 }} isAnimationActive={false} connectNulls />
           </LineChart>
         </ChartContainer>
-        <p>{records.length ? `已记录 ${records.length} 个实际温度点，最近一点：${formatSeconds(records.at(-1)?.seconds || 0)} · ${records.at(-1)?.temperature} ℃${records.at(-1)?.fan ? ` · 风门 ${records.at(-1)?.fan}/10` : ''}` : '准备入豆后，填写温度与克重；开始录豆后会从 0:00 记录实际曲线。'}</p>
+        <p>{records.length ? `已记录 ${records.length} 个实际温度点，最近一点：${formatSeconds(records.at(-1)?.seconds || 0)} · ${decimal(records.at(-1)?.temperature || 0)} ℃${records.at(-1)?.fan !== undefined ? ` · 风门 ${decimal(records.at(-1)?.fan || 0)}/10` : ''}` : '准备入豆后，填写温度与克重；开始录豆后会从 0:00 记录实际曲线。'}</p>
       </section>
+
+      {reviewMode && <section className="curve-record-list" aria-label="已记录的烘焙节点">
+        <div><h2>实际烘焙节点</h2><p>点击任一节点可以修正温度、风门或时间，保存后曲线会立即按新参数重画。</p></div>
+        {records.length ? <div className="curve-record-grid">{records.map((point, index) => <button key={index + point.stage} onClick={() => openStageRecord(point.stage, index)}><span>{point.stage}</span><strong>{formatSeconds(point.seconds)}</strong><small>{decimal(point.temperature)} ℃{point.fan !== undefined ? ` · 风门 ${decimal(point.fan)}/10` : ''}</small><em>修正</em></button>)}</div> : <p className="curve-record-empty">这张旧订单暂未保存实际曲线；可从阶段按钮补录节点，再保存修正。</p>}
+      </section>}
 
       <section className="roast-controls">
         <div className="stage-pad" aria-label="烘焙阶段">
@@ -735,15 +807,15 @@ function RoastConsole({
             <p>{started ? `记录时间 ${formatSeconds(recordAt)}（从输入第一个数字起算）` : '请先点击“准备入豆”，填写资料并开始录豆。'}</p>
           </div>
           <div className="number-pad" aria-label="输入豆温">
-            {['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'].map((digit) => <button key={digit} disabled={!started} onClick={() => addDigit(digit)}>{digit}</button>)}
+            {['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0'].map((digit) => <button key={digit} disabled={!started} onClick={() => addDigit(digit)}>{digit}</button>)}
             <button className="erase" disabled={!started} aria-label="删除最后一个数字" onClick={erase}><Delete size={20} /></button>
             <button className="record" disabled={!started || !temperature} onClick={recordTemperature}>记录温度</button>
           </div>
         </div>
       </section>
       <div className="roast-console-footer">
-        <span>温度点会按输入第一个数字时的时间写入曲线。</span>
-        <Button className="primary-action" disabled={busy || !started} onClick={finish}><CheckCheck />结束烘焙，转入待发货</Button>
+        <span>{reviewMode ? '完成后仍可在这里修正实际温度、风门和时间。' : '温度点会按输入第一个数字时的时间写入曲线。未使用的阶段无需填写。'}</span>
+        {reviewMode ? <Button className="primary-action" disabled={busy || !started} onClick={() => { const session = sessionForSave(); if (session) void saveCorrection(session); }}><CheckCheck />保存曲线修正</Button> : <Button className="primary-action" disabled={busy || !started} onClick={() => { const session = sessionForSave(); if (session) void finish(session); }}><CheckCheck />完成烘焙，转入待发货</Button>}
       </div>
       <Dialog open={chargeSetupOpen} onOpenChange={setChargeSetupOpen}>
         <DialogContent className="charge-setup-dialog">
@@ -755,9 +827,9 @@ function RoastConsole({
             <div className="charge-bean">本锅豆子<strong>{batch.orders[0].bean_name}</strong></div>
             <label htmlFor="roast-profile">本锅烘焙方案<NativeSelect id="roast-profile" value={profileId} onChange={(event) => { const next = event.target.value; setProfileId(next); const selected = profiles.find((item) => item.id === next); if (selected?.points.at(-1)?.temperature) setTargetTemperature(String(selected.points.at(-1)?.temperature)); if (selected) setTargetExit(defaultRoastTarget(selected.roast_level)); }}><option value="">临时方案（不套用已有曲线）</option>{profiles.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.roast_level}</option>)}</NativeSelect></label>
             <label htmlFor="roast-machine">烘焙机<NativeSelect id="roast-machine" value={machine} onChange={(event) => setMachine(event.target.value)}><option value="Sandouke 600">Sandouke 600</option></NativeSelect></label>
-            <label htmlFor="charge-temperature">入豆温度（℃）<Input id="charge-temperature" value={chargeTemperature} onChange={(event) => setChargeTemperature(event.target.value)} inputMode="numeric" type="number" min="0" max="350" required placeholder="例如 185" /></label>
+            <label htmlFor="charge-temperature">入豆温度（℃）<Input id="charge-temperature" value={chargeTemperature} onChange={(event) => setChargeTemperature(event.target.value)} inputMode="decimal" type="number" min="0" max="350" step="0.1" required placeholder="例如 185.0" /></label>
             <label htmlFor="charge-weight">入豆克重（g）<Input id="charge-weight" value={chargeWeight} onChange={(event) => setChargeWeight(event.target.value)} inputMode="numeric" type="number" min="1" max="100000" required placeholder="例如 1000" /></label>
-            <label htmlFor="target-temperature">目标出豆温度（℃）<Input id="target-temperature" value={targetTemperature} onChange={(event) => setTargetTemperature(event.target.value)} inputMode="numeric" type="number" min="0" max="350" required placeholder="例如 190" /></label>
+            <label htmlFor="target-temperature">目标出豆温度（℃）<Input id="target-temperature" value={targetTemperature} onChange={(event) => setTargetTemperature(event.target.value)} inputMode="decimal" type="number" min="0" max="350" step="0.1" required placeholder="例如 190.0" /></label>
             <label htmlFor="target-exit">目标出豆位置<NativeSelect id="target-exit" value={targetExit} onChange={(event) => setTargetExit(event.target.value)}>{roastTargets.map((target) => <option key={target.value} value={target.value}>{target.label} · {target.level}</option>)}</NativeSelect></label>
             <p className="roast-standard">默认参考：一爆初段为浅烘焙；一爆中段为中烘焙；一爆末段为中深烘焙；二爆中段为深烘焙；二爆末段为极深烘焙。</p>
             <Button className="begin-roast" type="submit" disabled={busy || !chargeTemperature || !chargeWeight || !targetTemperature}><Flame />开始录豆</Button>
@@ -767,22 +839,26 @@ function RoastConsole({
       <Dialog open={stageRecordOpen} onOpenChange={setStageRecordOpen}>
         <DialogContent className="stage-record-dialog">
           <DialogHeader>
-            <DialogTitle>{selectedStage}记录</DialogTitle>
-            <DialogDescription>填写此刻豆温，并直接点选风门档位。记录时间从输入温度的第一个数字开始计算。</DialogDescription>
+            <DialogTitle>{editingRecord === null ? selectedStage + '记录' : '修正' + selectedStage}</DialogTitle>
+            <DialogDescription>豆温与风门均可精确到 0.1；风门范围为 0.0–10.0。时间留空时，会从输入豆温的第一个数字开始计算。</DialogDescription>
           </DialogHeader>
           <form className="stage-record-form" onSubmit={(event) => { event.preventDefault(); recordStage(); }}>
             <div className="stage-touch-grid">
               <section className="stage-keypad" aria-label="触摸输入当前豆温">
                 <span>当前豆温（℃）</span>
                 <strong>{stageTemperature || '—'}<small>℃</small></strong>
-                <div>{['1','2','3','4','5','6','7','8','9','0'].map((digit) => <button type="button" key={digit} onClick={() => { if (!stageTypingStartedAt) setStageTypingStartedAt(now); setStageTemperature((value) => value.length >= 3 ? value : value + digit); }}>{digit}</button>)}<button className="erase" type="button" onClick={() => setStageTemperature((value) => { const next = value.slice(0, -1); if (!next) setStageTypingStartedAt(null); return next; })}><Delete size={20} /></button></div>
+                <div>{['1','2','3','4','5','6','7','8','9','.','0'].map((digit) => <button type="button" key={digit} onClick={() => { if (!stageTypingStartedAt) setStageTypingStartedAt(now); setStageTemperature((value) => appendDecimal(value, digit, 350)); }}>{digit}</button>)}<button className="erase" type="button" onClick={() => setStageTemperature((value) => { const next = value.slice(0, -1); if (!next) setStageTypingStartedAt(null); return next; })}><Delete size={20} /></button></div>
               </section>
-              <fieldset className="fan-picker">
-                <legend>风门（1–10）</legend>
-                <div>{Array.from({ length: 10 }, (_, index) => index + 1).map((fan) => <button className={stageFan === fan ? 'active' : ''} type="button" key={fan} onClick={() => setStageFan(fan)}>{fan}</button>)}</div>
-              </fieldset>
+              <div className="stage-fan-stack">
+                <section className="stage-fan-keypad" aria-label="触摸输入风门">
+                  <span>风门（0.0–10.0）</span>
+                  <strong>{stageFan || '—'}<small>/10</small></strong>
+                  <div>{['1','2','3','4','5','6','7','8','9','.','0'].map((digit) => <button type="button" key={digit} onClick={() => setStageFan((value) => appendDecimal(value, digit, 10))}>{digit}</button>)}<button className="erase" type="button" onClick={() => setStageFan((value) => value.slice(0, -1))}><Delete size={20} /></button></div>
+                </section>
+                <label className="stage-time-input" htmlFor="stage-record-time">修正时间（可选）<Input id="stage-record-time" value={stageTime} onChange={(event) => setStageTime(event.target.value)} inputMode="text" placeholder={`例如 ${formatSeconds(Math.max(0, startedAt === null ? 0 : Math.floor(((stageTypingStartedAt || now) - startedAt) / 1000)))}`} /><small>格式为 分:秒，例如 7:30。填写后曲线会按这个时间重新定位。</small></label>
+              </div>
             </div>
-            <Button className="stage-save" type="submit" disabled={!stageTemperature || !stageFan}><Thermometer />记录 {stageTemperature || '温度'} ℃ · 风门 {stageFan || '—'}</Button>
+            <Button className="stage-save" type="submit" disabled={!isOneDecimal(stageTemperature, 0, 350) || !isOneDecimal(stageFan, 0, 10)}><Thermometer />{editingRecord === null ? '记录' : '保存修正'} {stageTemperature || '温度'} ℃ · 风门 {stageFan || '—'}</Button>
           </form>
         </DialogContent>
       </Dialog>
@@ -799,6 +875,32 @@ function defaultRoastTarget(roastLevel: string) {
 
 function formatSeconds(seconds: number) {
   return Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0');
+}
+
+function parseSeconds(value: string) {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(value.trim());
+  if (!match) return null;
+  const minutes = Number(match[1]);
+  const seconds = Number(match[2]);
+  if (seconds > 59 || minutes * 60 + seconds > 7200) return null;
+  return minutes * 60 + seconds;
+}
+
+function decimal(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+function isOneDecimal(value: string, min: number, max: number) {
+  if (!/^\d{1,3}(?:\.\d)?$/.test(value)) return false;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric >= min && numeric <= max;
+}
+
+function appendDecimal(value: string, key: string, max: number) {
+  if (key === '.') return value && !value.includes('.') ? value + '.' : value;
+  const candidate = value + key;
+  if (!/^\d{1,3}(?:\.\d?)?$/.test(candidate)) return value;
+  return Number(candidate) <= max ? candidate : value;
 }
 
 function FulfillmentBoard({ data, busy, openShipment, delivered }: { data: OperationsData; busy: boolean; openShipment: (order: RoastOrder | 'sample') => void; delivered: (id: string) => void }) {

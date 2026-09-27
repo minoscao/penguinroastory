@@ -204,6 +204,7 @@ export function makeDemoDataset(anchor = new Date().toISOString()) {
           : '每袋 1kg，整豆，外袋贴烘焙日期。'),
       is_demo: 1,
       status,
+      roast_record: null,
       created_at: created,
       started_at: started,
       completed_at: completed,

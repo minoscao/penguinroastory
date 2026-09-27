@@ -178,6 +178,58 @@ export function shipmentInput(v: unknown) {
     notes: text(b.notes, '发货备注', 500),
   };
 }
+export function roastRecordInput(v: unknown) {
+  const b = object(v);
+  if (!Array.isArray(b.ids) || b.ids.length < 1 || b.ids.length > 100)
+    throw new InputError('请选择需要保存曲线的订单。');
+  const ids = b.ids.map((id) => {
+    const value = text(id, '订单', 80, true);
+    if (!/^[0-9a-f-]{36}$/i.test(value))
+      throw new InputError('订单识别码无效。');
+    return value;
+  });
+  if (new Set(ids).size !== ids.length) throw new InputError('订单不能重复。');
+  const record = object(b.record);
+  const target = object(record.target);
+  if (!Array.isArray(record.records) || record.records.length > 100)
+    throw new InputError('烘焙记录点数量不正确。');
+  const records = record.records.map((raw, index) => {
+    const point = object(raw);
+    const temperature = number(point.temperature, `第 ${index + 1} 个温度`, 0, 350);
+    const fan =
+      point.fan === undefined || point.fan === null
+        ? undefined
+        : number(point.fan, `第 ${index + 1} 个风门`, 0, 10);
+    if (
+      Math.round(temperature * 10) !== temperature * 10 ||
+      (fan !== undefined && Math.round(fan * 10) !== fan * 10)
+    )
+      throw new InputError('温度和风门最多保留一位小数。');
+    return {
+      stage: text(point.stage, '烘焙阶段', 30, true),
+      seconds: number(point.seconds, '记录时间（秒）', 0, 7200, true),
+      temperature,
+      ...(fan === undefined ? {} : { fan }),
+    };
+  });
+  return {
+    ids,
+    record: {
+      startedAt: number(record.startedAt, '开始时间', 0, 4102444800000, true),
+      machine: text(record.machine, '烘焙机', 100, true),
+      chargedGrams: number(record.chargedGrams, '投豆量（克）', 0, 100000, true),
+      target: {
+        temperature: text(target.temperature, '目标出豆温度', 20),
+        label: text(target.label, '目标出豆位置', 50),
+        level: text(target.level, '烘焙度', 50),
+        machine: text(target.machine, '目标烘焙机', 100, true),
+        profileId: text(target.profileId, '烘焙方案', 80),
+        profileName: text(target.profileName, '烘焙方案名称', 100),
+      },
+      records,
+    },
+  };
+}
 export function nextStatus(current: string, target: string) {
   if (
     !(

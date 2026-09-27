@@ -7,6 +7,7 @@ import {
   orderInput,
   inventoryInput,
   shipmentInput,
+  roastRecordInput,
   nextStatus,
   date,
 } from '../lib/validation.ts';
@@ -174,6 +175,27 @@ void test('库存变动和发货信息必须完整', () => {
   assert.throws(() =>
     shipmentInput({ customer_name: '测试客户', carrier: '顺丰' }),
   );
+});
+void test('实际烘焙曲线支持温度与风门的一位小数，并允许风门为零', () => {
+  const record = roastRecordInput({
+    ids: [crypto.randomUUID()],
+    record: {
+      startedAt: Date.now(),
+      machine: 'Sandouke 600',
+      chargedGrams: 1000,
+      target: { temperature: '198.0', label: '一爆初段出豆', level: '浅烘焙', machine: 'Sandouke 600' },
+      records: [{ stage: '回温', seconds: 95, temperature: 98.4, fan: 0.0 }],
+    },
+  });
+  assert.deepEqual(record.record.records[0], { stage: '回温', seconds: 95, temperature: 98.4, fan: 0 });
+  assert.throws(() => roastRecordInput({
+    ids: [crypto.randomUUID()],
+    record: {
+      startedAt: Date.now(), machine: 'Sandouke 600', chargedGrams: 1000,
+      target: { machine: 'Sandouke 600' },
+      records: [{ stage: '回温', seconds: 95, temperature: 98.44, fan: 10.1 }],
+    },
+  }));
 });
 void test('状态必须按等待、烘焙、完成的顺序推进', () => {
   assert.equal(nextStatus('waiting', 'roasting'), 'roasting');

@@ -71,6 +71,7 @@ import {
   type Profile,
   type Point,
   type RoastOrder,
+  type RoastRecord,
   type OrderEvent,
   type Catalog,
   type Status,
@@ -2076,6 +2077,9 @@ function OrderDetail({
         <span>下单时保存 · v{o.profile_snapshot.revision}</span>
       </div>
       <ProfileSummary profile={o.profile_snapshot} />
+      {o.status === 'completed' && (
+        <RoastRecordSummary record={o.roast_record} orderId={o.id} />
+      )}
       <div className="order-timeline" aria-label="订单进度">
         {(['waiting', 'roasting', 'completed'] as Status[]).map((s) => {
           const event = data.events.find((e) => e.status === s);
@@ -2098,10 +2102,23 @@ function OrderDetail({
       </div>
       <div className="detail-action">
         {o.status === 'completed' ? (
-          <p>
-            <CheckCheck size={18} />
-            这张订单的烘焙已经完成；发货请到“发货工作台”登记。
-          </p>
+          <>
+            <p>
+              <CheckCheck size={18} />
+              这张订单的烘焙已经完成；发货请到“发货工作台”登记。
+            </p>
+            <Button
+              variant="outline"
+              onClick={() =>
+                window.location.assign(
+                  '/roasting?order=' + encodeURIComponent(o.id),
+                )
+              }
+            >
+              <SlidersHorizontal size={16} />
+              {o.roast_record ? '修正烘焙曲线' : '补录烘焙曲线'}
+            </Button>
+          </>
         ) : (
           <>
             <p>
@@ -2134,4 +2151,30 @@ function OrderDetail({
       </div>
     </div>
   );
+}
+
+function RoastRecordSummary({
+  record,
+  orderId,
+}: {
+  record: RoastRecord | null;
+  orderId: string;
+}) {
+  const points = record ? [...record.records].sort((a, b) => a.seconds - b.seconds) : [];
+  return (
+    <section className="order-roast-summary">
+      <div>
+        <h3>本次实际烘焙曲线</h3>
+        <p>{record ? `${record.machine} · 投豆 ${weight(record.chargedGrams)} · ${points.length} 个记录点` : '旧订单尚未保存实际烘焙曲线，可随时补录。'}</p>
+      </div>
+      {points.length > 0 && <div className="order-roast-points">
+        {points.map((point, index) => <span key={point.stage + index}><strong>{point.stage}</strong>{timeLabel(point.seconds)} · {roastValue(point.temperature)} ℃{point.fan !== undefined ? ` · 风门 ${roastValue(point.fan)}/10` : ''}</span>)}
+      </div>}
+      <Button variant="outline" onClick={() => window.location.assign('/roasting?order=' + encodeURIComponent(orderId))}><SlidersHorizontal size={16} />修正烘焙曲线</Button>
+    </section>
+  );
+}
+
+function roastValue(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
