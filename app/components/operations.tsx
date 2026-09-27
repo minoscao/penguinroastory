@@ -681,12 +681,17 @@ function RoastConsole({
   function openStageRecord(stage: string, index: number | null = null) {
     setSelectedStage(stage);
     if (!started || stage === '准备入豆') return;
-    const existing = index === null ? null : records[index];
+    const matchingIndex = index ?? (() => {
+      for (let position = records.length - 1; position >= 0; position -= 1)
+        if (records[position].stage === stage) return position;
+      return null;
+    })();
+    const existing = matchingIndex === null ? null : records[matchingIndex];
     setStageTemperature(existing ? decimal(existing.temperature) : '');
     setStageTypingStartedAt(null);
     setStageFan(existing?.fan === undefined ? '' : decimal(existing.fan));
     setStageTime(existing ? formatSeconds(existing.seconds) : '');
-    setEditingRecord(index);
+    setEditingRecord(matchingIndex);
     setStageRecordOpen(true);
   }
 
@@ -703,10 +708,38 @@ function RoastConsole({
         : Math.floor(((stageTypingStartedAt || now) - startedAt) / 1000),
     );
     const nextPoint = { stage: selectedStage, seconds, temperature: value, fan };
-    setRecords((current) => editingRecord === null
-      ? [...current, nextPoint]
-      : current.map((point, index) => index === editingRecord ? nextPoint : point));
+    const nextRecords = editingRecord === null
+      ? [...records, nextPoint]
+      : records.map((point, index) => index === editingRecord ? nextPoint : point);
+    setRecords(nextRecords);
     setStageRecordOpen(false);
+    if (reviewMode && startedAt && confirmedTarget) {
+      void saveCorrection({
+        startedAt,
+        machine: confirmedTarget.machine,
+        chargedGrams,
+        target: confirmedTarget,
+        records: nextRecords,
+        isRecording: true,
+      });
+    }
+  }
+
+  function deleteStageRecord() {
+    if (editingRecord === null) return;
+    const nextRecords = records.filter((_, index) => index !== editingRecord);
+    setRecords(nextRecords);
+    setStageRecordOpen(false);
+    if (reviewMode && startedAt && confirmedTarget) {
+      void saveCorrection({
+        startedAt,
+        machine: confirmedTarget.machine,
+        chargedGrams,
+        target: confirmedTarget,
+        records: nextRecords,
+        isRecording: true,
+      });
+    }
   }
 
   async function beginRecording() {
@@ -858,7 +891,10 @@ function RoastConsole({
                 <label className="stage-time-input" htmlFor="stage-record-time">修正时间（可选）<Input id="stage-record-time" value={stageTime} onChange={(event) => setStageTime(event.target.value)} inputMode="text" placeholder={`例如 ${formatSeconds(Math.max(0, startedAt === null ? 0 : Math.floor(((stageTypingStartedAt || now) - startedAt) / 1000)))}`} /><small>格式为 分:秒，例如 7:30。填写后曲线会按这个时间重新定位。</small></label>
               </div>
             </div>
-            <Button className="stage-save" type="submit" disabled={!isOneDecimal(stageTemperature, 0, 350) || !isOneDecimal(stageFan, 0, 10)}><Thermometer />{editingRecord === null ? '记录' : '保存修正'} {stageTemperature || '温度'} ℃ · 风门 {stageFan || '—'}</Button>
+            <div className="stage-record-actions">
+              {editingRecord !== null && <Button className="delete-stage-record" type="button" variant="outline" disabled={busy} onClick={deleteStageRecord}><Delete />删除本条记录</Button>}
+              <Button className="stage-save" type="submit" disabled={busy || !isOneDecimal(stageTemperature, 0, 350) || !isOneDecimal(stageFan, 0, 10)}><Thermometer />{editingRecord === null ? '记录' : '保存修正'} {stageTemperature || '温度'} ℃ · 风门 {stageFan || '—'}</Button>
+            </div>
           </form>
         </DialogContent>
       </Dialog>
