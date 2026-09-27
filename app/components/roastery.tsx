@@ -2078,7 +2078,11 @@ function OrderDetail({
       </div>
       <ProfileSummary profile={o.profile_snapshot} />
       {o.status === 'completed' && (
-        <RoastRecordSummary record={o.roast_record} orderId={o.id} />
+        <RoastRecordSummary
+          record={o.roast_record}
+          orderId={o.id}
+          profilePoints={o.profile_snapshot.points}
+        />
       )}
       <div className="order-timeline" aria-label="订单进度">
         {(['waiting', 'roasting', 'completed'] as Status[]).map((s) => {
@@ -2156,9 +2160,11 @@ function OrderDetail({
 function RoastRecordSummary({
   record,
   orderId,
+  profilePoints,
 }: {
   record: RoastRecord | null;
   orderId: string;
+  profilePoints: Point[];
 }) {
   const points = record ? [...record.records].sort((a, b) => a.seconds - b.seconds) : [];
   return (
@@ -2167,11 +2173,64 @@ function RoastRecordSummary({
         <h3>本次实际烘焙曲线</h3>
         <p>{record ? `${record.machine} · 投豆 ${weight(record.chargedGrams)} · ${points.length} 个记录点` : '旧订单尚未保存实际烘焙曲线，可随时补录。'}</p>
       </div>
+      {points.length > 0 && <RoastRecordCurve points={points} profilePoints={profilePoints} />}
       {points.length > 0 && <div className="order-roast-points">
         {points.map((point, index) => <span key={point.stage + index}><strong>{point.stage}</strong>{timeLabel(point.seconds)} · {roastValue(point.temperature)} ℃{point.fan !== undefined ? ` · 风门 ${roastValue(point.fan)}/10` : ''}</span>)}
       </div>}
       <Button variant="outline" onClick={() => window.location.assign('/roasting?order=' + encodeURIComponent(orderId))}><SlidersHorizontal size={16} />修正烘焙曲线</Button>
     </section>
+  );
+}
+
+function RoastRecordCurve({
+  points,
+  profilePoints,
+}: {
+  points: RoastRecord['records'];
+  profilePoints: Point[];
+}) {
+  const merged = new Map<number, { seconds: number; plan?: number; actual?: number }>();
+  for (const point of profilePoints)
+    merged.set(point.seconds, {
+      ...merged.get(point.seconds),
+      seconds: point.seconds,
+      plan: point.temperature,
+    });
+  for (const point of points)
+    merged.set(point.seconds, {
+      ...merged.get(point.seconds),
+      seconds: point.seconds,
+      actual: point.temperature,
+    });
+  const chartData = [...merged.values()].sort((a, b) => a.seconds - b.seconds);
+  const chartEnd = Math.max(...chartData.map((point) => point.seconds), 60);
+  const chartMax = Math.max(
+    220,
+    ...chartData.flatMap((point) => [point.plan || 0, point.actual || 0]),
+  );
+  return (
+    <div className="order-roast-curve">
+      <div className="order-roast-legend">
+        <span><i className="plan" />方案参考</span>
+        <span><i className="actual" />本次实际</span>
+      </div>
+      <ChartContainer
+        config={{
+          plan: { label: '方案豆温', color: '#82979b' },
+          actual: { label: '本次豆温', color: '#d2763c' },
+        }}
+        className="order-roast-chart"
+      >
+        <LineChart data={chartData} margin={{ top: 14, right: 16, bottom: 2, left: -10 }}>
+          <CartesianGrid vertical={false} stroke="#dfe7e6" />
+          <XAxis dataKey="seconds" type="number" domain={[0, chartEnd]} tickFormatter={timeLabel} tickLine={false} axisLine={false} minTickGap={26} />
+          <YAxis domain={[0, Math.ceil((chartMax + 10) / 10) * 10]} tickFormatter={(value) => value + '°'} tickLine={false} axisLine={false} width={42} />
+          <Tooltip labelFormatter={(value) => timeLabel(Number(value))} formatter={(value, name) => [String(value) + ' ℃', name === 'plan' ? '方案豆温' : '本次豆温']} />
+          <Line type="linear" dataKey="plan" name="plan" stroke="#82979b" strokeWidth={2} strokeDasharray="5 5" dot={false} connectNulls isAnimationActive={false} />
+          <Line type="linear" dataKey="actual" name="actual" stroke="#d2763c" strokeWidth={3} dot={{ r: 4, fill: '#fff', stroke: '#d2763c', strokeWidth: 2 }} activeDot={{ r: 6 }} connectNulls isAnimationActive={false} />
+        </LineChart>
+      </ChartContainer>
+    </div>
   );
 }
 
