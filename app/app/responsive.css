@@ -110,11 +110,21 @@ button:disabled {
   height: 44px;
 }
 .roast-console-dialog {
+  position: fixed !important;
   inset: 0 !important;
   left: 0 !important;
   top: 0 !important;
   transform: none !important;
   translate: none !important;
+  /* Do not inherit the centered popup's individual translate from utilities.
+     Production CSS lowering may combine translate:none into transform:none. */
+  --tw-translate-x: 0px !important;
+  --tw-translate-y: 0px !important;
+  margin: 0 !important;
+  width: 100% !important;
+  height: 100vh;
+  height: 100dvh;
+  max-height: 100vh !important;
   max-height: 100dvh !important;
   padding: 22px !important;
 }

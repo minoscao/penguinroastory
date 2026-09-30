@@ -685,7 +685,7 @@ export default function OperationsPanel({
           void writes.current.finally(() => setReload((value) => value + 1));
         }}
       >
-        <DialogContent className="roast-console-dialog">
+        <DialogContent layout="fullscreen" className="roast-console-dialog">
           {error && (
             <div role="alert" className="form-error">
               {error}
