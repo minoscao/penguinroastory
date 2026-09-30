@@ -7,15 +7,25 @@ for db in (root/'.wrangler').rglob('*.sqlite'):
     with sqlite3.connect(db) as connection:
         exists=connection.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='orders'").fetchone()
         if not exists: continue
-        row=connection.execute('SELECT customer_id FROM orders WHERE id=?',(records['order'],)).fetchone()
-        if row and row[0]!=records['customer']: raise RuntimeError('Test ownership mismatch; cleanup stopped')
-        if records.get('shipment'):
-            connection.execute('DELETE FROM shipments WHERE id=?',(records['shipment'],))
-        connection.execute('DELETE FROM order_events WHERE order_id=?',(records['order'],))
-        connection.execute('DELETE FROM orders WHERE id=?',(records['order'],))
+        order_ids=records.get('orders') or [records['order']]
+        for order_id in order_ids:
+            row=connection.execute('SELECT customer_id FROM orders WHERE id=?',(order_id,)).fetchone()
+            if row and row[0]!=records['customer']: raise RuntimeError('Test ownership mismatch; cleanup stopped')
+        for shipment in records.get('shipments') or [records.get('shipment')]:
+            if shipment: connection.execute('DELETE FROM shipments WHERE id=?',(shipment,))
+        for order_id in order_ids:
+            connection.execute('DELETE FROM shipments WHERE order_id=?',(order_id,))
+            connection.execute('DELETE FROM order_events WHERE order_id=?',(order_id,))
+            connection.execute('DELETE FROM orders WHERE id=?',(order_id,))
+        if connection.execute("SELECT name FROM sqlite_master WHERE name='roast_machine_locks'").fetchone():
+            for batch_id, in connection.execute('SELECT batch_id FROM roast_machine_locks').fetchall():
+                if set(batch_id.split(',')).issubset(set(order_ids)):
+                    connection.execute('DELETE FROM roast_machine_locks WHERE batch_id=?',(batch_id,))
         if records.get('sku'):
             connection.execute('DELETE FROM stock_movements WHERE sku_id=?',(records['sku'],))
         connection.execute('DELETE FROM profiles WHERE id=?',(records['profile'],))
+        if records.get('bean'):
+            connection.execute('DELETE FROM profiles WHERE id=?',('pending-profile-'+records['bean'],))
         if records.get('sku'):
             connection.execute('DELETE FROM bean_skus WHERE id=?',(records['sku'],))
         connection.execute('DELETE FROM beans WHERE id=?',(records['bean'],))

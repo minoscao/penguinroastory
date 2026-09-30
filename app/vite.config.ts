@@ -53,6 +53,11 @@ export default defineConfig(async () => {
       vinext(),
       sites(),
       cloudflare({
+        // The audit server must never touch the operator's normal local data.
+        persistState:
+          process.env.ROASTORY_TEST_DATA === '1'
+            ? { path: '.wrangler/audit-state' }
+            : true,
         viteEnvironment: { name: 'rsc', childEnvironments: ['ssr'] },
         config: localBindingConfig,
       }),

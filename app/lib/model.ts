@@ -44,8 +44,8 @@ export type Point = {
   stage: string;
   seconds: number;
   temperature: number;
-  power: number;
-  fan: number;
+  power?: number;
+  fan?: number;
 };
 export type Profile = {
   id: string;
@@ -68,6 +68,8 @@ export type RoastRecordPoint = {
   fan?: number;
 };
 export type RoastRecord = {
+  orderIds?: string[];
+  referenceProfile?: Profile;
   startedAt: number;
   machine: string;
   chargedGrams: number;
@@ -100,6 +102,7 @@ export type RoastOrder = {
   notes: string;
   status: Status;
   roast_record: RoastRecord | null;
+  roast_revision?: number;
   created_at: string;
   started_at: string | null;
   completed_at: string | null;

@@ -158,7 +158,11 @@ async function request<T = Record<string, unknown>>(
   url: string,
   init?: RequestInit,
 ): Promise<T> {
-  const response = await fetch(url, { cache: 'no-store', ...init });
+  const response = await fetch(url, {
+    cache: 'no-store',
+    ...init,
+    signal: init?.signal || AbortSignal.timeout(15000),
+  });
   let data: unknown;
   try {
     data = await response.json();
@@ -179,14 +183,51 @@ function message(e: unknown) {
 function weight(grams: number) {
   return Math.round(grams).toLocaleString('zh-CN') + ' g';
 }
-function DateFilter({ value, onChange, label }: { value: string; onChange: (value: string) => void; label: string }) {
+function DateFilter({
+  value,
+  onChange,
+  label,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  label: string;
+}) {
+  const [unit, setUnit] = useState('day');
   return (
-    <label className="date-filter">
+    <div className="date-filter">
       <CalendarDays size={15} />
       <span>{label}</span>
-      <Input aria-label={label} type="date" value={value} onChange={(event) => onChange(event.target.value)} />
-      {value && <button type="button" aria-label="清除日期筛选" onClick={() => onChange('')}><X size={13} /></button>}
-    </label>
+      <select
+        aria-label="日期精度"
+        value={unit}
+        onChange={(event) => {
+          setUnit(event.target.value);
+          onChange('');
+        }}
+      >
+        <option value="day">按日</option>
+        <option value="month">按月</option>
+        <option value="year">按年</option>
+      </select>
+      <Input
+        aria-label={label}
+        type={unit === 'year' ? 'number' : unit === 'month' ? 'month' : 'date'}
+        min={unit === 'year' ? '2000' : undefined}
+        max={unit === 'year' ? '2100' : undefined}
+        placeholder={unit === 'year' ? '年份' : undefined}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      {value && (
+        <button
+          type="button"
+          aria-label="清除日期筛选"
+          onClick={() => onChange('')}
+        >
+          <X size={13} />
+        </button>
+      )}
+    </div>
   );
 }
 function stamp(s: string | null) {
@@ -330,10 +371,7 @@ function Curve({ points }: { points: Point[] }) {
 
 function ProfileDraftCurve({ points }: { points: Point[] }) {
   const chartEnd = Math.max(...points.map((point) => point.seconds), 60);
-  const chartMax = Math.max(
-    220,
-    ...points.map((point) => point.temperature),
-  );
+  const chartMax = Math.max(220, ...points.map((point) => point.temperature));
   if (points.length < 2)
     return (
       <div className="profile-poster-empty">
@@ -385,6 +423,8 @@ function ProfileDraftCurve({ points }: { points: Point[] }) {
   );
 }
 function ProfileSummary({ profile }: { profile: Profile }) {
+  if (profile.points.length < 2 || profile.id.startsWith('pending-profile-'))
+    return null;
   return (
     <>
       <div className="profile-facts">
@@ -418,8 +458,12 @@ function ProfileSummary({ profile }: { profile: Profile }) {
                 <TableCell>{p.stage}</TableCell>
                 <TableCell>{timeLabel(p.seconds)}</TableCell>
                 <TableCell>{p.temperature} ℃</TableCell>
-                <TableCell>{p.power}%</TableCell>
-                <TableCell>{p.fan}%</TableCell>
+                <TableCell>
+                  {p.power === undefined ? '—' : `${p.power}%`}
+                </TableCell>
+                <TableCell>
+                  {p.fan === undefined ? '—' : `${p.fan / 10}/10`}
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -449,23 +493,59 @@ function RecordModeToggle({
       {modes.map((item) => {
         const option = options[item];
         const Icon = option.icon;
-        return <button key={item} className={mode === item ? 'active' : ''} aria-pressed={mode === item} onClick={() => setMode(item)}><Icon size={15} />{option.label}</button>;
+        return (
+          <button
+            key={item}
+            className={mode === item ? 'active' : ''}
+            aria-pressed={mode === item}
+            onClick={() => setMode(item)}
+          >
+            <Icon size={15} />
+            {option.label}
+          </button>
+        );
       })}
     </div>
   );
 }
-function OrderCard({ order, open }: { order: RoastOrder; open: (modal: Modal) => void }) {
+function OrderCard({
+  order,
+  open,
+}: {
+  order: RoastOrder;
+  open: (modal: Modal) => void;
+}) {
   return (
     <article className="order-record-card">
-      <div><span>{order.code}</span><StatusTag status={order.status} /></div>
+      <div>
+        <span>{order.code}</span>
+        <StatusTag status={order.status} />
+      </div>
       <h3>{order.customer_name}</h3>
-      <p>{order.bean_name} · {weight(order.quantity_grams)}</p>
-      <small>{order.due_date ? '交付 ' + order.due_date : '交付日期待定'}</small>
-      <Button variant="outline" size="sm" onClick={() => open({ type: 'detail', id: order.id })}>查看订单<ArrowUpRight size={13} /></Button>
+      <p>
+        {order.bean_name} · {weight(order.quantity_grams)}
+      </p>
+      <small>
+        {order.due_date ? '交付 ' + order.due_date : '交付日期待定'}
+      </small>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => open({ type: 'detail', id: order.id })}
+      >
+        查看订单
+        <ArrowUpRight size={13} />
+      </Button>
     </article>
   );
 }
-function OrderCalendar({ orders, open }: { orders: RoastOrder[]; open: (modal: Modal) => void }) {
+function OrderCalendar({
+  orders,
+  open,
+}: {
+  orders: RoastOrder[];
+  open: (modal: Modal) => void;
+}) {
   const grouped = new Map<string, RoastOrder[]>();
   for (const order of orders) {
     const date = order.due_date || '未安排交付日期';
@@ -473,9 +553,27 @@ function OrderCalendar({ orders, open }: { orders: RoastOrder[]; open: (modal: M
   }
   return (
     <div className="order-calendar">
-      {[...grouped.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, items]) => (
-        <section key={date}><h3><CalendarDays size={16} />{date}</h3>{items.map((order) => <button key={order.id} onClick={() => open({ type: 'detail', id: order.id })}><span>{order.customer_name}</span><strong>{order.bean_name}</strong><small>{weight(order.quantity_grams)}</small><StatusTag status={order.status} /></button>)}</section>
-      ))}
+      {[...grouped.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([date, items]) => (
+          <section key={date}>
+            <h3>
+              <CalendarDays size={16} />
+              {date}
+            </h3>
+            {items.map((order) => (
+              <button
+                key={order.id}
+                onClick={() => open({ type: 'detail', id: order.id })}
+              >
+                <span>{order.customer_name}</span>
+                <strong>{order.bean_name}</strong>
+                <small>{weight(order.quantity_grams)}</small>
+                <StatusTag status={order.status} />
+              </button>
+            ))}
+          </section>
+        ))}
     </div>
   );
 }
@@ -509,21 +607,34 @@ function CustomerTable({
           {customers.map((customer, index) => (
             <tr key={customer.id}>
               <td className="customer-cell-name">
-                <span className={'customer-table-avatar avatar-tone-' + (index % 4)}>
+                <span
+                  className={'customer-table-avatar avatar-tone-' + (index % 4)}
+                >
                   <CustomerIcon type={customer.customer_type} size={18} />
                 </span>
                 <strong>{customer.name}</strong>
               </td>
               <td>{customerTypes[customer.customer_type] || '待确认'}</td>
-              <td>{customer.contact || (customer.customer_type === 'individual' ? customer.name : '待补充')}</td>
+              <td>
+                {customer.contact ||
+                  (customer.customer_type === 'individual'
+                    ? customer.name
+                    : '待补充')}
+              </td>
               <td>{customer.phone || '待补充'}</td>
               <td>{customer.notes || '淘宝历史发货表'}</td>
               <td>{customer.order_count || 0} 单</td>
               <td>{customer.active_orders || 0} 单</td>
               <td>{weight(customer.total_grams || 0)}</td>
-              <td>{customer.last_order_at ? stamp(customer.last_order_at) : '—'}</td>
+              <td>
+                {customer.last_order_at ? stamp(customer.last_order_at) : '—'}
+              </td>
               <td className="customer-table-action">
-                <Button variant="ghost" size="sm" onClick={() => onEdit(customer)}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onEdit(customer)}
+                >
                   <Pencil size={14} /> 编辑
                 </Button>
               </td>
@@ -540,16 +651,87 @@ function Dashboard({ catalog }: { catalog: Catalog | null }) {
   return (
     <div className="dashboard-grid">
       <section className="dashboard-hero">
-        <div><p className="eyebrow">TODAY AT THE ROASTERY</p><h2>今天的烘焙工作</h2><p>从正在处理的订单开始。</p></div>
-        <Link className="primary-action dashboard-cta" href="/roasting"><Flame />开始烘焙</Link>
+        <div>
+          <p className="eyebrow">TODAY AT THE ROASTERY</p>
+          <h2>今天的烘焙工作</h2>
+          <p>从正在处理的订单开始。</p>
+        </div>
+        <Link className="primary-action dashboard-cta" href="/roasting">
+          <Flame />
+          开始烘焙
+        </Link>
       </section>
       <section className="dashboard-stats" aria-label="今日概况">
-        <Link href="/roasting"><span>等待烘焙</span><strong>{count?.waiting ?? 0}</strong><small>张订单</small></Link>
-        <Link href="/roasting"><span>正在烘焙</span><strong>{count?.roasting ?? 0}</strong><small>张订单</small></Link>
-        <Link href="/orders"><span>已完成</span><strong>{count?.completed ?? 0}</strong><small>张订单</small></Link>
+        <Link href="/roasting">
+          <span>等待烘焙</span>
+          <strong>{count?.waiting ?? 0}</strong>
+          <small>张订单</small>
+        </Link>
+        <Link href="/roasting">
+          <span>正在烘焙</span>
+          <strong>{count?.roasting ?? 0}</strong>
+          <small>张订单</small>
+        </Link>
+        <Link href="/orders">
+          <span>已完成</span>
+          <strong>{count?.completed ?? 0}</strong>
+          <small>张订单</small>
+        </Link>
       </section>
-      <section className="dashboard-section panel"><div className="panel-heading"><h2>工作区</h2></div><div className="dashboard-actions"><Link href="/roasting"><Flame /><div><strong>烘焙</strong><span>合并订单，记录每一锅。</span></div><ArrowRight /></Link><Link href="/fulfillment"><Truck /><div><strong>发货</strong><span>登记快递与签收。</span></div><ArrowRight /></Link></div></section>
-      <section className="dashboard-section panel"><div className="panel-heading"><h2>档案</h2></div><div className="dashboard-actions archive"><Link href="/orders"><ClipboardList /><div><strong>订单</strong><span>全部订单与筛选。</span></div><ArrowRight /></Link><Link href="/beans"><BeanIcon /><div><strong>豆子</strong><span>库存和烘焙方案。</span></div><ArrowRight /></Link><Link href="/customers"><Users /><div><strong>客户</strong><span>联系人与偏好。</span></div><ArrowRight /></Link></div></section>
+      <section className="dashboard-section panel">
+        <div className="panel-heading">
+          <h2>工作区</h2>
+        </div>
+        <div className="dashboard-actions">
+          <Link href="/roasting">
+            <Flame />
+            <div>
+              <strong>烘焙</strong>
+              <span>合并订单，记录每一锅。</span>
+            </div>
+            <ArrowRight />
+          </Link>
+          <Link href="/fulfillment">
+            <Truck />
+            <div>
+              <strong>发货</strong>
+              <span>登记快递与签收。</span>
+            </div>
+            <ArrowRight />
+          </Link>
+        </div>
+      </section>
+      <section className="dashboard-section panel">
+        <div className="panel-heading">
+          <h2>档案</h2>
+        </div>
+        <div className="dashboard-actions archive">
+          <Link href="/orders">
+            <ClipboardList />
+            <div>
+              <strong>订单</strong>
+              <span>全部订单与筛选。</span>
+            </div>
+            <ArrowRight />
+          </Link>
+          <Link href="/beans">
+            <BeanIcon />
+            <div>
+              <strong>豆子</strong>
+              <span>库存和烘焙方案。</span>
+            </div>
+            <ArrowRight />
+          </Link>
+          <Link href="/customers">
+            <Users />
+            <div>
+              <strong>客户</strong>
+              <span>联系人与偏好。</span>
+            </div>
+            <ArrowRight />
+          </Link>
+        </div>
+      </section>
     </div>
   );
 }
@@ -579,6 +761,31 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
     [loading, setLoading] = useState(true);
   const isOrders = view === 'orders' || view === 'completed';
   const status = view === 'completed' ? 'completed' : filter;
+  const sheetRef = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    // Keep lists and open read-only details in sync without resetting edit forms.
+    if (modal && modal.type !== 'detail') return;
+    const refresh = () => setRevision((value) => value + 1);
+    window.addEventListener('focus', refresh);
+    const timer = window.setInterval(refresh, 15000);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      window.clearInterval(timer);
+    };
+  }, [modal]);
+  useEffect(() => {
+    if (!modal) return;
+    const sheet = sheetRef.current;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    if (sheet && !sheet.open) sheet.showModal();
+    sheet?.scrollTo(0, 0);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      previousFocus?.focus();
+    };
+  }, [modal]);
   useEffect(() => {
     const timer = setTimeout(() => {
       setSearch(q);
@@ -618,6 +825,7 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
           status,
           q: search,
           date: dateFilter,
+          date_field: view === 'completed' ? 'completed' : 'created',
           page: String(page),
         }),
       { signal: controller.signal },
@@ -633,7 +841,7 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
         }
       });
     return () => controller.abort();
-  }, [isOrders, status, search, dateFilter, page, revision, source]);
+  }, [isOrders, status, search, dateFilter, page, revision, source, view]);
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(''), 6000);
@@ -689,18 +897,53 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
           </span>
         </Link>
         <nav aria-label="主导航" className="sectioned-nav">
-          {([
-            { label: '仪表盘', items: [{ view: 'dashboard', url: '/', icon: LayoutDashboard }] },
-            { label: '业务区', items: [{ view: 'roasting', url: '/roasting', icon: Flame }, { view: 'fulfillment', url: '/fulfillment', icon: Truck }] },
-            { label: '档案区', items: [{ view: 'orders', url: '/orders', icon: ClipboardList }, { view: 'beans', url: '/beans', icon: BeanIcon }, { view: 'customers', url: '/customers', icon: Users }] },
-            { label: '系统管理', items: [{ view: 'admin', url: '/admin', icon: Warehouse }] },
-          ] as const).map((section) => (
+          {(
+            [
+              {
+                label: '仪表盘',
+                items: [{ view: 'dashboard', url: '/', icon: LayoutDashboard }],
+              },
+              {
+                label: '业务区',
+                items: [
+                  { view: 'roasting', url: '/roasting', icon: Flame },
+                  { view: 'fulfillment', url: '/fulfillment', icon: Truck },
+                ],
+              },
+              {
+                label: '档案区',
+                items: [
+                  { view: 'orders', url: '/orders', icon: ClipboardList },
+                  { view: 'beans', url: '/beans', icon: BeanIcon },
+                  { view: 'customers', url: '/customers', icon: Users },
+                ],
+              },
+              {
+                label: '系统管理',
+                items: [{ view: 'admin', url: '/admin', icon: Warehouse }],
+              },
+            ] as const
+          ).map((section) => (
             <div className="nav-section" key={section.label}>
               <p className="nav-label">{section.label}</p>
               {section.items.map((n) => (
-                <Link key={n.view} className={'nav-item ' + (view === n.view ? 'active' : '')} href={n.url} title={views[n.view].title} aria-label={views[n.view].title} aria-current={view === n.view ? 'page' : undefined}>
-                  <n.icon />{views[n.view].title}
-                  {n.view === 'roasting' && count && count.waiting + count.roasting > 0 && <span className="nav-count">{count.waiting + count.roasting}</span>}
+                <Link
+                  key={n.view}
+                  className={'nav-item ' + (view === n.view ? 'active' : '')}
+                  href={n.url}
+                  title={views[n.view].title}
+                  aria-label={views[n.view].title}
+                  aria-current={view === n.view ? 'page' : undefined}
+                >
+                  <n.icon />
+                  {views[n.view].title}
+                  {n.view === 'roasting' &&
+                    count &&
+                    count.waiting + count.roasting > 0 && (
+                      <span className="nav-count">
+                        {count.waiting + count.roasting}
+                      </span>
+                    )}
                 </Link>
               ))}
             </div>
@@ -725,7 +968,10 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
             </h1>
             <p className="subtitle">{details.subtitle}</p>
           </div>
-          {(view === 'orders' || view === 'completed' || view === 'beans' || view === 'customers') && (
+          {(view === 'orders' ||
+            view === 'completed' ||
+            view === 'beans' ||
+            view === 'customers') && (
             <Button
               className="primary-action"
               onClick={() =>
@@ -811,9 +1057,17 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
         )}
         {view === 'dashboard' ? (
           <Dashboard catalog={catalog} />
-        ) : view === 'roasting' || view === 'fulfillment' || view === 'admin' ? (
+        ) : view === 'roasting' ||
+          view === 'fulfillment' ||
+          view === 'admin' ? (
           <>
-            {view !== 'admin' && <DateFilter value={dateFilter} onChange={setDateFilter} label="工作日期" />}
+            {view !== 'admin' && (
+              <DateFilter
+                value={dateFilter}
+                onChange={setDateFilter}
+                label="工作日期"
+              />
+            )}
             <OperationsPanel
               view={view}
               catalog={catalog}
@@ -844,7 +1098,11 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
               </Button>
             </div>
             <div className="toolbar">
-              <RecordModeToggle mode={recordMode} setMode={setRecordMode} modes={['list', 'cards', 'calendar']} />
+              <RecordModeToggle
+                mode={recordMode}
+                setMode={setRecordMode}
+                modes={['list', 'cards', 'calendar']}
+              />
               {view === 'orders' && (
                 <div className="filter-tabs" aria-label="按订单状态筛选">
                   {(['all', 'waiting', 'roasting', 'completed'] as const).map(
@@ -864,7 +1122,14 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                   )}
                 </div>
               )}
-              <DateFilter value={dateFilter} onChange={(date) => { setDateFilter(date); setPage(1); }} label={view === 'completed' ? '完成日期' : '下单日期'} />
+              <DateFilter
+                value={dateFilter}
+                onChange={(date) => {
+                  setDateFilter(date);
+                  setPage(1);
+                }}
+                label={view === 'completed' ? '完成日期' : '下单日期'}
+              />
               <div className="search-box">
                 <Search size={16} />
                 <Input
@@ -899,98 +1164,103 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                   <OrderCalendar orders={list.orders} open={open} />
                 ) : recordMode === 'cards' ? (
                   <div className="order-card-grid">
-                    {list.orders.map((o) => <OrderCard key={o.id} order={o} open={open} />)}
+                    {list.orders.map((o) => (
+                      <OrderCard key={o.id} order={o} open={open} />
+                    ))}
                   </div>
                 ) : (
-                <Table className="orders-table">
-                  <TableHeader>
-                    <TableRow>
-                      {[
-                        '订单 / 客户',
-                        '豆子与烘焙方案',
-                        '熟豆数量',
-                        view === 'completed' ? '完成时间' : '交付日期',
-                        '状态',
-                        '操作',
-                      ].map((t) => (
-                        <TableHead key={t}>{t}</TableHead>
-                      ))}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {list.orders.map((o) => (
-                      <TableRow key={o.id}>
-                        <TableCell>
-                          <button
-                            className="order-link"
-                            onClick={() => open({ type: 'detail', id: o.id })}
-                          >
-                            {o.code}
-                          </button>
-                          {!!o.is_demo && <DemoBadge />}
-                          <span className="cell-sub customer-cell">
-                            <CustomerIcon
-                              type={
-                                catalog?.customers.find(
-                                  (c) => c.id === o.customer_id,
-                                )?.customer_type
-                              }
-                              size={14}
-                            />
-                            {o.customer_name}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <div className="order-coffee">
-                            <CoffeePicture
-                              small
-                              imageKey={
-                                catalog?.beans.find((b) => b.id === o.bean_id)
-                                  ?.image_key
-                              }
-                            />
-                            <div>
-                              <strong className="cell-title">
-                                {o.bean_name}
-                              </strong>
-                              <span className="cell-sub">
-                                {o.profile_snapshot.name} ·{' '}
-                                {o.profile_snapshot.roast_level}
-                              </span>
-                            </div>
-                          </div>
-                        </TableCell>
-                        <TableCell className="quantity">
-                          {weight(o.quantity_grams)}
-                        </TableCell>
-                        <TableCell>
-                          {view === 'completed'
-                            ? stamp(o.completed_at)
-                            : o.due_date || '未指定'}
-                        </TableCell>
-                        <TableCell>
-                          <StatusTag status={o.status} />
-                        </TableCell>
-                        <TableCell>
-                          <Button
-                            variant={
-                              o.status === 'completed' ? 'ghost' : 'outline'
-                            }
-                            size="sm"
-                            onClick={() => open({ type: 'detail', id: o.id })}
-                          >
-                            {o.status === 'waiting'
-                              ? '开始烘焙'
-                              : o.status === 'roasting'
-                                ? '记录曲线'
-                                : '查看记录'}
-                            <ArrowUpRight size={13} />
-                          </Button>
-                        </TableCell>
+                  <Table className="orders-table">
+                    <TableHeader>
+                      <TableRow>
+                        {[
+                          '订单 / 客户',
+                          '豆子与烘焙方案',
+                          '熟豆数量',
+                          view === 'completed' ? '完成时间' : '交付日期',
+                          '状态',
+                          '操作',
+                        ].map((t) => (
+                          <TableHead key={t}>{t}</TableHead>
+                        ))}
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {list.orders.map((o) => (
+                        <TableRow key={o.id}>
+                          <TableCell>
+                            <button
+                              className="order-link"
+                              onClick={() => open({ type: 'detail', id: o.id })}
+                            >
+                              {o.code}
+                            </button>
+                            {!!o.is_demo && <DemoBadge />}
+                            <span className="cell-sub customer-cell">
+                              <CustomerIcon
+                                type={
+                                  catalog?.customers.find(
+                                    (c) => c.id === o.customer_id,
+                                  )?.customer_type
+                                }
+                                size={14}
+                              />
+                              {o.customer_name}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <div className="order-coffee">
+                              <CoffeePicture
+                                small
+                                imageKey={
+                                  catalog?.beans.find((b) => b.id === o.bean_id)
+                                    ?.image_key
+                                }
+                              />
+                              <div>
+                                <strong className="cell-title">
+                                  {o.bean_name}
+                                </strong>
+                                <span className="cell-sub">
+                                  {o.roast_record
+                                    ? `${o.roast_record.target.profileName || '临时方案'} · ${o.roast_record.target.level}`
+                                    : o.profile_snapshot.points.length
+                                      ? `${o.profile_snapshot.name} · ${o.profile_snapshot.roast_level}`
+                                      : '入豆时选择参考方案'}
+                                </span>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="quantity">
+                            {weight(o.quantity_grams)}
+                          </TableCell>
+                          <TableCell>
+                            {view === 'completed'
+                              ? stamp(o.completed_at)
+                              : o.due_date || '未指定'}
+                          </TableCell>
+                          <TableCell>
+                            <StatusTag status={o.status} />
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              variant={
+                                o.status === 'completed' ? 'ghost' : 'outline'
+                              }
+                              size="sm"
+                              onClick={() => open({ type: 'detail', id: o.id })}
+                            >
+                              {o.status === 'waiting'
+                                ? '开始烘焙'
+                                : o.status === 'roasting'
+                                  ? '记录曲线'
+                                  : '查看记录'}
+                              <ArrowUpRight size={13} />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
                 )}
                 <div className="pagination">
                   <span>
@@ -1062,7 +1332,11 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                     : '—'}
                 </span>
               </span>
-              <RecordModeToggle mode={recordMode} setMode={setRecordMode} modes={['list', 'cards']} />
+              <RecordModeToggle
+                mode={recordMode}
+                setMode={setRecordMode}
+                modes={['list', 'cards']}
+              />
               <div className="search-box">
                 <Search size={16} />
                 <Input
@@ -1080,92 +1354,217 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
             {!catalog ? (
               <div className="loading-state">正在读取档案…</div>
             ) : view === 'beans' ? (
-              <div className={'catalog-grid ' + (recordMode === 'list' ? 'record-list' : '')}>
-                {catalog.beans
-                  .filter((b) =>
-                    (b.name + b.origin + b.process + b.variety + b.notes)
+              recordMode === 'list' && catalog.beans.length > 0 ? (
+                <div className="panel bean-table-panel">
+                  <Table className="bean-table">
+                    <TableHeader>
+                      <TableRow>
+                        {[
+                          '豆子',
+                          '产地',
+                          '处理法',
+                          '海拔',
+                          '库存',
+                          '烘焙方案',
+                          '操作',
+                        ].map((label) => (
+                          <TableHead key={label}>{label}</TableHead>
+                        ))}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {catalog.beans
+                        .filter((b) =>
+                          (
+                            b.name +
+                            b.origin +
+                            b.process +
+                            (b.altitude || '') +
+                            b.variety +
+                            b.notes
+                          )
+                            .toLowerCase()
+                            .includes(q.toLowerCase()),
+                        )
+                        .map((b) => (
+                          <TableRow key={b.id}>
+                            <TableCell>
+                              <strong>{b.name}</strong>
+                              {b.variety && (
+                                <small className="cell-sub">{b.variety}</small>
+                              )}
+                            </TableCell>
+                            <TableCell>{b.origin || '—'}</TableCell>
+                            <TableCell>{b.process || '—'}</TableCell>
+                            <TableCell>{b.altitude || '—'}</TableCell>
+                            <TableCell>
+                              {weight(
+                                catalog.skus
+                                  .filter((s) => s.bean_id === b.id)
+                                  .reduce((sum, s) => sum + s.stock_grams, 0),
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              {
+                                catalog.profiles.filter(
+                                  (p) => p.bean_id === b.id,
+                                ).length
+                              }{' '}
+                              套
+                            </TableCell>
+                            <TableCell className="bean-table-actions">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() =>
+                                  open({ type: 'profiles', bean: b })
+                                }
+                              >
+                                管理方案
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() =>
+                                  open({ type: 'bean', record: b })
+                                }
+                              >
+                                编辑
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                    </TableBody>
+                  </Table>
+                  {!catalog.beans.some((b) =>
+                    (
+                      b.name +
+                      b.origin +
+                      b.process +
+                      (b.altitude || '') +
+                      b.variety +
+                      b.notes
+                    )
                       .toLowerCase()
                       .includes(q.toLowerCase()),
-                  )
-                  .map((b) => (
-                    <article className="bean-card" key={b.id}>
-                      <div className="bean-visual">
-                        <CoffeePicture imageKey={b.image_key} />
-                        <div className="bean-picture-label">
-                          上传豆子海报
-                        </div>
-                        {!!b.is_demo && <DemoBadge />}
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label={'编辑' + b.name}
-                          onClick={() => open({ type: 'bean', record: b })}
-                        >
-                          <Pencil size={15} />
-                        </Button>
-                      </div>
-                      <div className="bean-card-body">
-                        <p className="origin-line">
-                          <MapPin size={14} />
-                          {b.origin || '产地待补充'}
-                        </p>
-                        <h2>{b.name}</h2>
-                        <div className="chips">
-                          <span>{b.process || '处理法待补充'}</span>
-                          {b.altitude && <span>海拔 {b.altitude}</span>}
-                          {b.variety && <span>{b.variety}</span>}
-                        </div>
-                        <p className="catalog-notes">
-                          {b.notes || '还没有风味备注，随时记下你的观察。'}
-                        </p>
-                        <div className="sku-preview">
-                          <div>
-                            <strong>
-                              库存 {weight(catalog.skus.filter((sku) => sku.bean_id === b.id).reduce((sum, sku) => sum + sku.stock_grams, 0))}
-                            </strong>
-                            <span>库存按批次在库存管理中维护</span>
-                          </div>
-                        </div>
-                        <div className="card-bottom">
-                          <span>
-                            <SlidersHorizontal size={15} />
-                            {
-                              catalog.profiles.filter((p) => p.bean_id === b.id)
-                                .length
-                            }{' '}
-                            套烘焙方案
-                          </span>
+                  ) && <p className="empty-state">没有符合条件的豆子</p>}
+                </div>
+              ) : (
+                <div
+                  className={
+                    'catalog-grid ' +
+                    (recordMode === 'list' ? 'record-list' : '')
+                  }
+                >
+                  {catalog.beans
+                    .filter((b) =>
+                      (
+                        b.name +
+                        b.origin +
+                        b.process +
+                        (b.altitude || '') +
+                        b.variety +
+                        b.notes
+                      )
+                        .toLowerCase()
+                        .includes(q.toLowerCase()),
+                    )
+                    .map((b) => (
+                      <article className="bean-card" key={b.id}>
+                        <div className="bean-visual">
+                          <CoffeePicture imageKey={b.image_key} />
+                          <div className="bean-picture-label">上传豆子海报</div>
+                          {!!b.is_demo && <DemoBadge />}
                           <Button
                             variant="ghost"
-                            size="sm"
-                            onClick={() => open({ type: 'profiles', bean: b })}
+                            size="icon-sm"
+                            aria-label={'编辑' + b.name}
+                            onClick={() => open({ type: 'bean', record: b })}
                           >
-                            管理方案
-                            <ArrowRight size={14} />
+                            <Pencil size={15} />
                           </Button>
                         </div>
-                      </div>
-                    </article>
-                  ))}
-                {catalog.beans.filter((b) =>
-                  (b.name + b.origin + b.process + b.altitude + b.variety + b.notes)
-                    .toLowerCase()
-                    .includes(q.toLowerCase()),
-                ).length === 0 && (
-                  <div className="panel empty-state full-width">
-                    <BeanIcon size={38} />
-                    <h3>{q ? '没有找到这款豆子' : '先认识你的第一款豆子'}</h3>
-                    <p>记下豆子的名字和特点，再给它添加烘焙方案。</p>
-                    <Button
-                      className="primary-action"
-                      onClick={() => open({ type: 'bean' })}
-                    >
-                      <Plus />
-                      新增豆子
-                    </Button>
-                  </div>
-                )}
-              </div>
+                        <div className="bean-card-body">
+                          <p className="origin-line">
+                            <MapPin size={14} />
+                            {b.origin || '产地待补充'}
+                          </p>
+                          <h2>{b.name}</h2>
+                          <div className="chips">
+                            <span>{b.process || '处理法待补充'}</span>
+                            {b.altitude && <span>海拔 {b.altitude}</span>}
+                            {b.variety && <span>{b.variety}</span>}
+                          </div>
+                          <p className="catalog-notes">
+                            {b.notes || '还没有风味备注，随时记下你的观察。'}
+                          </p>
+                          <div className="sku-preview">
+                            <div>
+                              <strong>
+                                库存{' '}
+                                {weight(
+                                  catalog.skus
+                                    .filter((sku) => sku.bean_id === b.id)
+                                    .reduce(
+                                      (sum, sku) => sum + sku.stock_grams,
+                                      0,
+                                    ),
+                                )}
+                              </strong>
+                              <span>库存按批次在库存管理中维护</span>
+                            </div>
+                          </div>
+                          <div className="card-bottom">
+                            <span>
+                              <SlidersHorizontal size={15} />
+                              {
+                                catalog.profiles.filter(
+                                  (p) => p.bean_id === b.id,
+                                ).length
+                              }{' '}
+                              套烘焙方案
+                            </span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() =>
+                                open({ type: 'profiles', bean: b })
+                              }
+                            >
+                              管理方案
+                              <ArrowRight size={14} />
+                            </Button>
+                          </div>
+                        </div>
+                      </article>
+                    ))}
+                  {catalog.beans.filter((b) =>
+                    (
+                      b.name +
+                      b.origin +
+                      b.process +
+                      b.altitude +
+                      b.variety +
+                      b.notes
+                    )
+                      .toLowerCase()
+                      .includes(q.toLowerCase()),
+                  ).length === 0 && (
+                    <div className="panel empty-state full-width">
+                      <BeanIcon size={38} />
+                      <h3>{q ? '没有找到这款豆子' : '先认识你的第一款豆子'}</h3>
+                      <p>记下豆子的名字和特点，再给它添加烘焙方案。</p>
+                      <Button
+                        className="primary-action"
+                        onClick={() => open({ type: 'bean' })}
+                      >
+                        <Plus />
+                        新增豆子
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )
             ) : (
               <section aria-label="客户档案">
                 <div className="customer-filters">
@@ -1211,103 +1610,110 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                 {recordMode === 'list' ? (
                   <CustomerTable
                     customers={visibleCustomers}
-                    onEdit={(customer) => open({ type: 'customer', record: customer })}
+                    onEdit={(customer) =>
+                      open({ type: 'customer', record: customer })
+                    }
                   />
                 ) : (
-                <div className="customer-grid">
-                  {visibleCustomers.map((c, i) => (
-                    <article
-                      className={'customer-card customer-' + c.customer_type}
-                      key={c.id}
-                    >
-                      <div className="customer-card-head">
-                        <div
-                          className={'customer-avatar avatar-tone-' + (i % 4)}
-                        >
-                          <CustomerIcon type={c.customer_type} size={29} />
+                  <div className="customer-grid">
+                    {visibleCustomers.map((c, i) => (
+                      <article
+                        className={'customer-card customer-' + c.customer_type}
+                        key={c.id}
+                      >
+                        <div className="customer-card-head">
+                          <div
+                            className={'customer-avatar avatar-tone-' + (i % 4)}
+                          >
+                            <CustomerIcon type={c.customer_type} size={29} />
+                          </div>
+                          <div className="customer-card-heading">
+                            <span className="customer-kind">
+                              {customerTypes[c.customer_type] || '类型待确认'}
+                            </span>
+                            <h2>{c.name}</h2>
+                          </div>
+                          {!!c.is_demo && <DemoBadge />}
                         </div>
-                        <div className="customer-card-heading">
-                          <span className="customer-kind">
-                            {customerTypes[c.customer_type] || '类型待确认'}
+                        <div className="customer-contact">
+                          <span>
+                            <UserRound size={15} />
+                            {c.contact ||
+                              (c.customer_type === 'individual'
+                                ? c.name
+                                : '联系人待补充')}
                           </span>
-                          <h2>{c.name}</h2>
+                          <span>
+                            <Phone size={15} />
+                            {c.phone || '联系方式待补充'}
+                          </span>
                         </div>
-                        {!!c.is_demo && <DemoBadge />}
-                      </div>
-                      <div className="customer-contact">
-                        <span>
-                          <UserRound size={15} />
-                          {c.contact ||
-                            (c.customer_type === 'individual'
-                              ? c.name
-                              : '联系人待补充')}
-                        </span>
-                        <span>
-                          <Phone size={15} />
-                          {c.phone || '联系方式待补充'}
-                        </span>
-                      </div>
-                      <div className="customer-preference">
-                        <Heart size={16} />
-                        <p>{c.notes || '记下喜欢的风味，让下一杯更合心意。'}</p>
-                      </div>
-                      <div className="customer-numbers">
-                        <span>
-                          <strong>
-                            {c.order_count || 0}
-                            <small> 单</small>
-                          </strong>
-                          累计订单
-                        </span>
-                        <span>
-                          <strong>
-                            {c.active_orders || 0}
-                            <small> 单</small>
-                          </strong>
-                          待完成
-                        </span>
-                        <span>
-                          <strong>{weight(c.total_grams || 0)}</strong>累计订购
-                        </span>
-                      </div>
-                      <div className="customer-card-bottom">
-                        <span>
-                          <PackageCheck size={14} />
-                          {c.last_order_at
-                            ? '最近下单 ' + stamp(c.last_order_at)
-                            : '还没有下单记录'}
-                        </span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => open({ type: 'customer', record: c })}
-                        >
-                          <Pencil size={14} />
-                          编辑
-                        </Button>
-                      </div>
-                    </article>
-                  ))}
-                </div>
+                        <div className="customer-preference">
+                          <Heart size={16} />
+                          <p>
+                            {c.notes || '记下喜欢的风味，让下一杯更合心意。'}
+                          </p>
+                        </div>
+                        <div className="customer-numbers">
+                          <span>
+                            <strong>
+                              {c.order_count || 0}
+                              <small> 单</small>
+                            </strong>
+                            累计订单
+                          </span>
+                          <span>
+                            <strong>
+                              {c.active_orders || 0}
+                              <small> 单</small>
+                            </strong>
+                            待完成
+                          </span>
+                          <span>
+                            <strong>{weight(c.total_grams || 0)}</strong>
+                            累计订购
+                          </span>
+                        </div>
+                        <div className="customer-card-bottom">
+                          <span>
+                            <PackageCheck size={14} />
+                            {c.last_order_at
+                              ? '最近下单 ' + stamp(c.last_order_at)
+                              : '还没有下单记录'}
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() =>
+                              open({ type: 'customer', record: c })
+                            }
+                          >
+                            <Pencil size={14} />
+                            编辑
+                          </Button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
                 )}
                 {visibleCustomers.length === 0 && (
-                    <div className="panel empty-state full-width">
-                      <Users size={38} />
-                      <h3>
-                        {q || customerType !== 'all'
-                          ? '没有找到符合条件的客户'
-                          : '记下你的第一位客户'}
-                      </h3>
-                      <p>个人、咖啡馆和公司都可以记录在这里。</p>
-                      <Button
-                        className="primary-action"
-                        onClick={() => open({ type: 'customer' })}
-                      >
-                        <Plus />
-                        新增客户
-                      </Button>
-                    </div>
-                  )}
+                  <div className="panel empty-state full-width">
+                    <Users size={38} />
+                    <h3>
+                      {q || customerType !== 'all'
+                        ? '没有找到符合条件的客户'
+                        : '记下你的第一位客户'}
+                    </h3>
+                    <p>个人、咖啡馆和公司都可以记录在这里。</p>
+                    <Button
+                      className="primary-action"
+                      onClick={() => open({ type: 'customer' })}
+                    >
+                      <Plus />
+                      新增客户
+                    </Button>
+                  </div>
+                )}
               </section>
             )}
           </>
@@ -1328,7 +1734,11 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
       {modal && (
         <div className="archive-sheet-layer" role="presentation">
           <dialog
-            open
+            ref={sheetRef}
+            onCancel={() => {
+              setModal(null);
+              setFormError('');
+            }}
             aria-modal="true"
             aria-label="编辑窗口"
             className={
@@ -1338,138 +1748,137 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                 : '')
             }
           >
-          <button
-            type="button"
-            className="sheet-close"
-            aria-label="关闭窗口"
-            onClick={() => {
-              setModal(null);
-              setFormError('');
-            }}
-          >
-            <X size={20} />
-          </button>
-          <header className="sheet-header">
-            <h2>
-              {modal?.type === 'customer'
-                ? modal.record
-                  ? '编辑客户'
-                  : '新增客户'
-                : modal?.type === 'bean'
+            <button
+              type="button"
+              className="sheet-close"
+              aria-label="关闭窗口"
+              onClick={() => {
+                setModal(null);
+                setFormError('');
+              }}
+            >
+              <X size={20} />
+            </button>
+            <header className="sheet-header">
+              <h2>
+                {modal?.type === 'customer'
                   ? modal.record
-                    ? '编辑豆子'
-                    : '新增豆子'
-                  : modal?.type === 'sku'
-                    ? modal.bean.name + ' · 新增批次'
-                  : modal?.type === 'profiles'
-                    ? modal.bean.name + ' · 烘焙方案'
-                    : modal?.type === 'profile'
-                      ? modal.record
-                        ? '编辑烘焙方案'
-                        : '新增烘焙方案'
-                      : modal?.type === 'order'
-                        ? '新建烘焙订单'
-                        : '订单详情'}
-            </h2>
-            {modal?.type !== 'customer' && modal?.type !== 'bean' && modal?.type !== 'detail' && (
-              <p>
-                {modal?.type === 'order'
-                ? '选好客户、豆子和方案，安排这次烘焙。'
-                : modal?.type === 'sku'
-                  ? '为这款豆子登记到货批次和入库重量。'
-                  : modal?.type === 'profile'
-                  ? '记录你自己的目标参数。保存方案不会更改历史订单。'
-                  : modal?.type === 'profiles'
-                    ? '同一款豆子，可以保存不同的烘焙方案。'
-                    : ''}
-              </p>
+                    ? '编辑客户'
+                    : '新增客户'
+                  : modal?.type === 'bean'
+                    ? modal.record
+                      ? '编辑豆子'
+                      : '新增豆子'
+                    : modal?.type === 'sku'
+                      ? modal.bean.name + ' · 新增批次'
+                      : modal?.type === 'profiles'
+                        ? modal.bean.name + ' · 烘焙方案'
+                        : modal?.type === 'profile'
+                          ? modal.record
+                            ? '编辑烘焙方案'
+                            : '新增烘焙方案'
+                          : modal?.type === 'order'
+                            ? '新建烘焙订单'
+                            : '订单详情'}
+              </h2>
+              {modal?.type !== 'customer' &&
+                modal?.type !== 'bean' &&
+                modal?.type !== 'detail' && (
+                  <p>
+                    {modal?.type === 'order'
+                      ? '选择客户、豆子和重量，烘焙方案在入豆时确定。'
+                      : modal?.type === 'sku'
+                        ? '为这款豆子登记到货批次和入库重量。'
+                        : modal?.type === 'profile'
+                          ? '记录你自己的目标参数。保存方案不会更改历史订单。'
+                          : modal?.type === 'profiles'
+                            ? '同一款豆子，可以保存不同的烘焙方案。'
+                            : ''}
+                  </p>
+                )}
+            </header>
+            {formError && (
+              <div role="alert" className="form-error">
+                {formError}
+              </div>
             )}
-          </header>
-          {formError && (
-            <div role="alert" className="form-error">
-              {formError}
-            </div>
-          )}
-          {(modal?.type === 'customer' || modal?.type === 'bean') && (
-            <CatalogForm
-              key={modal.type + (modal.record?.id || 'new')}
-              modal={modal}
-              busy={busy}
-              mutate={mutate}
-            />
-          )}
-          {modal?.type === 'sku' && (
-            <SkuForm bean={modal.bean} busy={busy} mutate={mutate} />
-          )}
-          {modal?.type === 'profiles' && catalog && (
-            <div className="profiles-list">
-              {catalog.profiles
-                .filter((p) => p.bean_id === modal.bean.id)
-                .map((p) => (
-                  <div className="profile-card" key={p.id}>
-                    <div>
-                      <h3>
-                        {p.name}
-                        <small>v{p.revision}</small>
-                      </h3>
-                      <span>
-                        {p.roast_level} · 投豆 {weight(p.batch_grams)} ·{' '}
-                        {timeLabel(p.points.at(-1)?.seconds || 0)}
-                      </span>
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() =>
-                        open({ type: 'profile', bean: modal.bean, record: p })
-                      }
-                    >
-                      查看 / 编辑
-                    </Button>
-                  </div>
-                ))}
-              {catalog.profiles.filter((p) => p.bean_id === modal.bean.id)
-                .length === 0 && (
-                <p className="hint">
-                  这款豆子还没有烘焙方案。先添加一套，就可以创建订单。
-                </p>
-              )}
-              <Button
-                className="primary-action"
-                onClick={() => open({ type: 'profile', bean: modal.bean })}
-              >
-                <Plus />
-                新增烘焙方案
-              </Button>
-            </div>
-          )}
-          {modal?.type === 'profile' && (
-            <ProfileForm
-              key={modal.record?.id || 'new'}
-              bean={modal.bean}
-              profile={modal.record}
-              busy={busy}
-              mutate={mutate}
-              onBack={() => open({ type: 'profiles', bean: modal.bean })}
-            />
-          )}
-          {modal?.type === 'order' &&
-            (catalog ? (
-              <OrderForm
-                catalog={catalog}
+            {(modal?.type === 'customer' || modal?.type === 'bean') && (
+              <CatalogForm
+                key={modal.type + (modal.record?.id || 'new')}
+                modal={modal}
                 busy={busy}
                 mutate={mutate}
-                open={open}
               />
-            ) : (
-              <p className="hint">正在读取客户和豆子档案…</p>
-            ))}
-          {modal?.type === 'detail' && (
-            <OrderDetail
-              id={modal.id}
-              revision={revision}
-            />
-          )}
+            )}
+            {modal?.type === 'sku' && (
+              <SkuForm bean={modal.bean} busy={busy} mutate={mutate} />
+            )}
+            {modal?.type === 'profiles' && catalog && (
+              <div className="profiles-list">
+                {catalog.profiles
+                  .filter((p) => p.bean_id === modal.bean.id)
+                  .map((p) => (
+                    <div className="profile-card" key={p.id}>
+                      <div>
+                        <h3>
+                          {p.name}
+                          <small>v{p.revision}</small>
+                        </h3>
+                        <span>
+                          {p.roast_level} · 投豆 {weight(p.batch_grams)} ·{' '}
+                          {timeLabel(p.points.at(-1)?.seconds || 0)}
+                        </span>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          open({ type: 'profile', bean: modal.bean, record: p })
+                        }
+                      >
+                        查看 / 编辑
+                      </Button>
+                    </div>
+                  ))}
+                {catalog.profiles.filter((p) => p.bean_id === modal.bean.id)
+                  .length === 0 && (
+                  <p className="hint">
+                    还没有参考方案。可以先创建订单，也可以在这里保存理想曲线。
+                  </p>
+                )}
+                <Button
+                  className="primary-action"
+                  onClick={() => open({ type: 'profile', bean: modal.bean })}
+                >
+                  <Plus />
+                  新增烘焙方案
+                </Button>
+              </div>
+            )}
+            {modal?.type === 'profile' && (
+              <ProfileForm
+                key={modal.record?.id || 'new'}
+                bean={modal.bean}
+                profile={modal.record}
+                busy={busy}
+                mutate={mutate}
+                onBack={() => open({ type: 'profiles', bean: modal.bean })}
+              />
+            )}
+            {modal?.type === 'order' &&
+              (catalog ? (
+                <OrderForm
+                  catalog={catalog}
+                  busy={busy}
+                  mutate={mutate}
+                  open={open}
+                />
+              ) : (
+                <p className="hint">正在读取客户和豆子档案…</p>
+              ))}
+            {modal?.type === 'detail' && (
+              <OrderDetail id={modal.id} revision={revision} />
+            )}
           </dialog>
         </div>
       )}
@@ -1503,24 +1912,50 @@ function SkuForm({
     <form onSubmit={submit}>
       <fieldset disabled={busy} className="form-grid">
         <Field label="批次名称 *" wide>
-          <Input name="label" required maxLength={100} placeholder="例如：2026 水洗批次" />
+          <Input
+            name="label"
+            required
+            maxLength={100}
+            placeholder="例如：2026 水洗批次"
+          />
         </Field>
         <Field label="年份">
           <Input name="harvest_year" maxLength={20} placeholder="2026" />
         </Field>
         <Field label="处理法">
-          <Input name="process" maxLength={100} defaultValue={bean.process} placeholder="水洗、日晒…" />
+          <Input
+            name="process"
+            maxLength={100}
+            defaultValue={bean.process}
+            placeholder="水洗、日晒…"
+          />
         </Field>
         <Field label="海拔（米）">
-          <Input name="altitude_m" type="number" min="0" max="10000" defaultValue="0" />
+          <Input
+            name="altitude_m"
+            type="number"
+            min="0"
+            max="10000"
+            defaultValue="0"
+          />
         </Field>
         <Field label="批次编号">
           <Input name="batch_code" maxLength={80} placeholder="例如 ETH-2601" />
         </Field>
         <Field label="初始库存（g）*" wide>
-          <Input name="stock_g" type="number" required min="0" max="100000000" step="1" defaultValue="0" />
+          <Input
+            name="stock_g"
+            type="number"
+            required
+            min="0"
+            max="100000000"
+            step="1"
+            defaultValue="0"
+          />
         </Field>
-        <p className="hint field-wide">保存以后，这个批次会进入库存管理；新订单会自动从可用批次扣减。</p>
+        <p className="hint field-wide">
+          保存以后，这个批次会进入库存管理；新订单会自动从可用批次扣减。
+        </p>
         <div className="form-actions field-wide">
           <span>库存以生豆重量记录</span>
           <Button type="submit" className="primary-action">
@@ -1556,12 +1991,9 @@ function CatalogForm({
   async function remove() {
     if (!r) return;
     const label = modal.type === 'customer' ? '客户档案' : '豆子档案';
-    if (!window.confirm(`确认删除「${r.name}」的${label}吗？此操作无法恢复。`)) return;
-    await mutate(
-      'DELETE',
-      { kind: modal.type, id: r.id },
-      `${label}已删除`,
-    );
+    if (!window.confirm(`确认删除「${r.name}」的${label}吗？此操作无法恢复。`))
+      return;
+    await mutate('DELETE', { kind: modal.type, id: r.id }, `${label}已删除`);
   }
   return (
     <form onSubmit={submit}>
@@ -1642,7 +2074,7 @@ function CatalogForm({
                 placeholder="例如：1900–2200m"
               />
             </Field>
-            <Field label="品种" wide>
+            <Field label="品种">
               <Input
                 name="variety"
                 maxLength={100}
@@ -1684,7 +2116,18 @@ function CatalogForm({
         <div className="form-actions field-wide">
           <span>* 为必填项</span>
           <div className="archive-form-actions">
-            {r && <Button type="button" variant="destructive" className="archive-delete" disabled={busy} onClick={() => void remove()}><Trash2 size={16} />删除档案</Button>}
+            {r && (
+              <Button
+                type="button"
+                variant="destructive"
+                className="archive-delete"
+                disabled={busy}
+                onClick={() => void remove()}
+              >
+                <Trash2 size={16} />
+                删除档案
+              </Button>
+            )}
             <Button type="submit" className="primary-action">
               {busy ? '正在保存…' : '保存档案'}
               <Check size={16} />
@@ -1722,18 +2165,32 @@ const profileStageAliases: Record<string, string[]> = {
 };
 
 function profileDraft(profile?: Profile): DraftPoint[] {
-  return profileStages.map((definition, index) => {
-    const saved = profile?.points.find((point) =>
+  const remaining = [...(profile?.points || [])];
+  const standard = profileStages.map((definition, index) => {
+    const savedIndex = remaining.findIndex((point) =>
       profileStageAliases[definition.stage].includes(point.stage.trim()),
     );
+    const saved =
+      savedIndex < 0 ? undefined : remaining.splice(savedIndex, 1)[0];
     return {
       stage: definition.stage,
       time: saved ? timeLabel(saved.seconds) : index === 0 ? '0:00' : '',
       temperature: saved ? String(saved.temperature) : '',
-      power: saved ? String(saved.power) : '',
-      fan: saved ? String(saved.fan) : '',
+      power: saved?.power === undefined ? '' : String(saved.power),
+      fan: saved?.fan === undefined ? '' : String(saved.fan / 10),
     };
   });
+  // Keep custom and repeated legacy nodes instead of dropping them on save.
+  return [
+    ...standard,
+    ...remaining.map((point) => ({
+      stage: point.stage,
+      time: timeLabel(point.seconds),
+      temperature: String(point.temperature),
+      power: point.power === undefined ? '' : String(point.power),
+      fan: point.fan === undefined ? '' : String(point.fan / 10),
+    })),
+  ];
 }
 
 function ProfileForm({
@@ -1749,7 +2206,10 @@ function ProfileForm({
   mutate: Mutate;
   onBack: () => void;
 }) {
-  const [points, setPoints] = useState<DraftPoint[]>(() => profileDraft(profile));
+  const [points, setPoints] = useState<DraftPoint[]>(() =>
+    profileDraft(profile),
+  );
+  const [profileName, setProfileName] = useState(profile?.name || '');
   const [error, setError] = useState('');
   function seconds(time: string) {
     if (!/^\d{1,3}:[0-5]\d$/.test(time))
@@ -1758,7 +2218,8 @@ function ProfileForm({
     return m * 60 + s;
   }
   const previewPoints = points.flatMap((point) => {
-    if (!/^\d{1,3}:[0-5]\d$/.test(point.time)) return [];
+    if (!point.temperature.trim() || !/^\d{1,3}:[0-5]\d$/.test(point.time))
+      return [];
     const temperature = Number(point.temperature);
     if (!Number.isFinite(temperature) || temperature < 0 || temperature > 350)
       return [];
@@ -1783,12 +2244,12 @@ function ProfileForm({
         ),
       );
       const incomplete = used.find((point) =>
-        [point.time, point.temperature, point.power, point.fan].some(
-          (value) => !value.trim(),
-        ),
+        [point.time, point.temperature].some((value) => !value.trim()),
       );
       if (incomplete)
-        throw new Error(`请补齐「${incomplete.stage}」的时间、温度、火力和风门。`);
+        throw new Error(
+          `请补齐「${incomplete.stage}」的时间和温度。火力、风门可选填。`,
+        );
       if (!used.some((point) => point.stage === '入豆'))
         throw new Error('请填写入豆温度，作为理想曲线的开始点。');
       if (!used.some((point) => point.stage === '出豆'))
@@ -1800,13 +2261,15 @@ function ProfileForm({
           kind: 'profile',
           bean_id: bean.id,
           batch_grams: Math.round(Number(data.batch_g)),
-          points: used.map((p) => ({
-            stage: p.stage,
-            seconds: seconds(p.time),
-            temperature: p.temperature,
-            power: p.power,
-            fan: p.fan,
-          })),
+          points: used
+            .map((p) => ({
+              stage: p.stage,
+              seconds: seconds(p.time),
+              temperature: p.temperature,
+              power: p.power,
+              fan: p.fan === '' ? undefined : Number(p.fan) * 10,
+            }))
+            .sort((a, b) => a.seconds - b.seconds),
           ...(profile ? { id: profile.id, revision: profile.revision } : {}),
         },
         '烘焙方案已保存',
@@ -1826,7 +2289,8 @@ function ProfileForm({
         <Field label="方案名称 *">
           <Input
             name="name"
-            defaultValue={profile?.name}
+            value={profileName}
+            onChange={(event) => setProfileName(event.target.value)}
             placeholder="例如：手冲浅烘 · 第一次调整"
             required
             maxLength={100}
@@ -1872,20 +2336,21 @@ function ProfileForm({
             <span>时间格式：分:秒，如 1:30</span>
           </div>
           <p className="hint">
-            按烘焙阶段填写你想要的豆温、火力和风门。入豆与出豆必填；二爆等没有发生的阶段可以留空。
+            入豆与出豆必填，二爆等阶段可留空；火力和风门选填。风门为
+            0–10，支持一位小数。
           </p>
           <section className="profile-poster" aria-label="理想烘焙曲线预览">
             <div className="profile-poster-head">
               <div>
                 <span>IDEAL ROAST PROFILE</span>
-                <strong>{profile?.name || '未命名烘焙方案'}</strong>
+                <strong>{profileName || '未命名烘焙方案'}</strong>
               </div>
               <small>保存后会叠加在烘焙工作台，供本锅实时参考</small>
             </div>
             <ProfileDraftCurve points={previewPoints} />
             <div className="profile-poster-stages">
-              {previewPoints.map((point) => (
-                <span key={point.stage}>
+              {previewPoints.map((point, index) => (
+                <span key={point.stage + index}>
                   <strong>{point.stage}</strong>
                   {timeLabel(point.seconds)} · {point.temperature} ℃
                 </span>
@@ -1894,20 +2359,29 @@ function ProfileForm({
           </section>
           <div className="profile-stage-editor">
             {points.map((point, index) => {
-              const definition = profileStages[index];
+              const definition = profileStages[index] || {
+                stage: point.stage,
+                label: '自定义节点',
+                hint: '保留原方案参数',
+              };
               return (
-                <article className="profile-stage-row" key={point.stage}>
+                <article
+                  className="profile-stage-row"
+                  key={point.stage + index}
+                >
                   <div className="profile-stage-name">
                     <span>{String(index + 1).padStart(2, '0')}</span>
                     <strong>{definition.stage}</strong>
-                    <small>{definition.label} · {definition.hint}</small>
+                    <small>
+                      {definition.label} · {definition.hint}
+                    </small>
                   </div>
                   {(
                     [
                       ['time', '时间', '1:30'],
                       ['temperature', '豆温 ℃', '例如 198'],
                       ['power', '火力 %', '例如 60'],
-                      ['fan', '风门 %', '例如 40'],
+                      ['fan', '风门 0–10', '例如 4.5'],
                     ] as const
                   ).map(([key, label, placeholder]) => (
                     <label key={key}>
@@ -1916,9 +2390,14 @@ function ProfileForm({
                         aria-label={`${definition.stage}${label}`}
                         type={key === 'time' ? 'text' : 'number'}
                         min="0"
-                        max={key === 'temperature' ? 350 : 100}
+                        max={
+                          key === 'temperature' ? 350 : key === 'fan' ? 10 : 100
+                        }
+                        readOnly={key === 'time' && point.stage === '入豆'}
                         step="0.1"
-                        pattern={key === 'time' ? '[0-9]{1,3}:[0-5][0-9]' : undefined}
+                        pattern={
+                          key === 'time' ? '[0-9]{1,3}:[0-5][0-9]' : undefined
+                        }
                         placeholder={placeholder}
                         value={point[key]}
                         onChange={(event) =>
@@ -1976,7 +2455,9 @@ function OrderForm({
     [requestId] = useState(() => crypto.randomUUID());
   const skus = catalog.skus.filter((s) => s.bean_id === beanId);
   const customers = catalog.customers.filter((c) =>
-    (c.name + c.contact + c.phone).toLowerCase().includes(customerQuery.toLowerCase()),
+    (c.name + c.contact + c.phone)
+      .toLowerCase()
+      .includes(customerQuery.toLowerCase()),
   );
   const availableStock = skus.reduce((sum, sku) => sum + sku.stock_grams, 0);
   async function submit(e: SyntheticEvent<HTMLFormElement>) {
@@ -2076,7 +2557,7 @@ function OrderForm({
             min="1"
             max="100000000"
             step="1"
-            placeholder="本次计划使用的生豆重量"
+            placeholder="例如 250"
           />
         </Field>
         <Field label="交付日期">
@@ -2084,7 +2565,12 @@ function OrderForm({
         </Field>
         <div className="inventory-hint">
           <Warehouse size={18} />
-          <span>创建后自动从可用批次扣减生豆库存<strong>{beanId ? `当前可用 ${weight(availableStock)}` : '请选择豆子'}</strong></span>
+          <span>
+            创建后自动从可用批次扣减生豆库存
+            <strong>
+              {beanId ? `当前可用 ${weight(availableStock)}` : '请选择豆子'}
+            </strong>
+          </span>
         </div>
         <Field label="订单备注" wide>
           <Textarea
@@ -2098,7 +2584,11 @@ function OrderForm({
         </div>
         <div className="form-actions field-wide">
           <span>创建后为“等待烘焙”</span>
-          <Button type="submit" className="primary-action" disabled={!customerId || !beanId}>
+          <Button
+            type="submit"
+            className="primary-action"
+            disabled={!customerId || !beanId}
+          >
             {busy ? '正在创建…' : '创建订单'}
             <ArrowRight size={16} />
           </Button>
@@ -2107,13 +2597,7 @@ function OrderForm({
     </form>
   );
 }
-function OrderDetail({
-  id,
-  revision,
-}: {
-  id: string;
-  revision: number;
-}) {
+function OrderDetail({ id, revision }: { id: string; revision: number }) {
   const [data, setData] = useState<{
       order: RoastOrder;
       events: OrderEvent[];
@@ -2170,17 +2654,34 @@ function OrderDetail({
         </span>
       </div>
       {o.notes && <p className="notes">{o.notes}</p>}
-      <div className="section-label">
-        <h3>{o.profile_snapshot.name}</h3>
-        <span>下单时保存 · v{o.profile_snapshot.revision}</span>
-      </div>
+      {o.profile_snapshot.points.length >= 2 && (
+        <div className="section-label">
+          <h3>{o.profile_snapshot.name}</h3>
+          <span>下单时保存 · v{o.profile_snapshot.revision}</span>
+        </div>
+      )}
       <ProfileSummary profile={o.profile_snapshot} />
-      {o.status === 'completed' && (
+      {o.roast_record ? (
         <RoastRecordSummary
           record={o.roast_record}
-          orderId={o.id}
-          profilePoints={o.profile_snapshot.points}
+          profilePoints={
+            o.roast_record.referenceProfile?.points || o.profile_snapshot.points
+          }
         />
+      ) : (
+        <div className="workflow-empty">
+          <Flame size={24} />
+          <div>
+            <strong>
+              {o.status === 'waiting' ? '待安排烘焙' : '尚无已保存曲线'}
+            </strong>
+            <p>
+              {o.status === 'waiting'
+                ? '进入记录台后，选择参考方案、填写入豆温度与克重。实际入豆后才开始计时。'
+                : '进入记录台继续记录或补录历史节点。'}
+            </p>
+          </div>
+        </div>
       )}
       <div className="order-timeline" aria-label="订单进度">
         {(['waiting', 'roasting', 'completed'] as Status[]).map((s) => {
@@ -2257,25 +2758,40 @@ function OrderDetail({
 
 function RoastRecordSummary({
   record,
-  orderId,
   profilePoints,
 }: {
   record: RoastRecord | null;
-  orderId: string;
   profilePoints: Point[];
 }) {
-  const points = record ? [...record.records].sort((a, b) => a.seconds - b.seconds) : [];
+  const points = record
+    ? [...record.records].sort((a, b) => a.seconds - b.seconds)
+    : [];
   return (
     <section className="order-roast-summary">
       <div>
         <h3>本次实际烘焙曲线</h3>
-        <p>{record ? `${record.machine} · 投豆 ${weight(record.chargedGrams)} · ${points.length} 个记录点` : '旧订单尚未保存实际烘焙曲线，可随时补录。'}</p>
+        <p>
+          {record
+            ? `${record.machine} · 投豆 ${weight(record.chargedGrams)} · ${record.target.level} · ${points.length} 个记录点`
+            : '旧订单尚未保存实际烘焙曲线，可随时补录。'}
+        </p>
       </div>
-      {points.length > 0 && <RoastRecordCurve points={points} profilePoints={profilePoints} />}
-      {points.length > 0 && <div className="order-roast-points">
-        {points.map((point, index) => <span key={point.stage + index}><strong>{point.stage}</strong>{timeLabel(point.seconds)} · {roastValue(point.temperature)} ℃{point.fan !== undefined ? ` · 风门 ${roastValue(point.fan)}/10` : ''}</span>)}
-      </div>}
-      <Button variant="outline" onClick={() => window.location.assign('/roasting?order=' + encodeURIComponent(orderId))}><SlidersHorizontal size={16} />修正烘焙曲线</Button>
+      {points.length > 0 && (
+        <RoastRecordCurve points={points} profilePoints={profilePoints} />
+      )}
+      {points.length > 0 && (
+        <div className="order-roast-points">
+          {points.map((point, index) => (
+            <span key={point.stage + index}>
+              <strong>{point.stage}</strong>
+              {timeLabel(point.seconds)} · {roastValue(point.temperature)} ℃
+              {point.fan !== undefined
+                ? ` · 风门 ${roastValue(point.fan)}/10`
+                : ''}
+            </span>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
@@ -2287,7 +2803,10 @@ function RoastRecordCurve({
   points: RoastRecord['records'];
   profilePoints: Point[];
 }) {
-  const merged = new Map<number, { seconds: number; plan?: number; actual?: number }>();
+  const merged = new Map<
+    number,
+    { seconds: number; plan?: number; actual?: number }
+  >();
   for (const point of profilePoints)
     merged.set(point.seconds, {
       ...merged.get(point.seconds),
@@ -2309,8 +2828,14 @@ function RoastRecordCurve({
   return (
     <div className="order-roast-curve">
       <div className="order-roast-legend">
-        <span><i className="plan" />方案参考</span>
-        <span><i className="actual" />本次实际</span>
+        <span>
+          <i className="plan" />
+          方案参考
+        </span>
+        <span>
+          <i className="actual" />
+          本次实际
+        </span>
       </div>
       <ChartContainer
         config={{
@@ -2319,13 +2844,56 @@ function RoastRecordCurve({
         }}
         className="order-roast-chart"
       >
-        <LineChart data={chartData} margin={{ top: 14, right: 16, bottom: 2, left: -10 }}>
+        <LineChart
+          data={chartData}
+          margin={{ top: 14, right: 16, bottom: 2, left: -10 }}
+        >
           <CartesianGrid vertical={false} stroke="#dfe7e6" />
-          <XAxis dataKey="seconds" type="number" domain={[0, chartEnd]} tickFormatter={timeLabel} tickLine={false} axisLine={false} minTickGap={26} />
-          <YAxis domain={[0, Math.ceil((chartMax + 10) / 10) * 10]} tickFormatter={(value) => value + '°'} tickLine={false} axisLine={false} width={42} />
-          <Tooltip labelFormatter={(value) => timeLabel(Number(value))} formatter={(value, name) => [String(value) + ' ℃', name === 'plan' ? '方案豆温' : '本次豆温']} />
-          <Line type="linear" dataKey="plan" name="plan" stroke="#82979b" strokeWidth={2} strokeDasharray="5 5" dot={false} connectNulls isAnimationActive={false} />
-          <Line type="linear" dataKey="actual" name="actual" stroke="#d2763c" strokeWidth={3} dot={{ r: 4, fill: '#fff', stroke: '#d2763c', strokeWidth: 2 }} activeDot={{ r: 6 }} connectNulls isAnimationActive={false} />
+          <XAxis
+            dataKey="seconds"
+            type="number"
+            domain={[0, chartEnd]}
+            tickFormatter={timeLabel}
+            tickLine={false}
+            axisLine={false}
+            minTickGap={26}
+          />
+          <YAxis
+            domain={[0, Math.ceil((chartMax + 10) / 10) * 10]}
+            tickFormatter={(value) => value + '°'}
+            tickLine={false}
+            axisLine={false}
+            width={42}
+          />
+          <Tooltip
+            labelFormatter={(value) => timeLabel(Number(value))}
+            formatter={(value, name) => [
+              String(value) + ' ℃',
+              name === 'plan' ? '方案豆温' : '本次豆温',
+            ]}
+          />
+          <Line
+            type="linear"
+            dataKey="plan"
+            name="plan"
+            stroke="#82979b"
+            strokeWidth={2}
+            strokeDasharray="5 5"
+            dot={false}
+            connectNulls
+            isAnimationActive={false}
+          />
+          <Line
+            type="linear"
+            dataKey="actual"
+            name="actual"
+            stroke="#d2763c"
+            strokeWidth={3}
+            dot={{ r: 4, fill: '#fff', stroke: '#d2763c', strokeWidth: 2 }}
+            activeDot={{ r: 6 }}
+            connectNulls
+            isAnimationActive={false}
+          />
         </LineChart>
       </ChartContainer>
     </div>

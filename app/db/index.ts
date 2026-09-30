@@ -15,6 +15,7 @@ async function upgradeCatalog(db: D1Database) {
     ['orders', 'batch_count', 'INTEGER NOT NULL DEFAULT 1'],
     ['orders', 'stock_deducted_grams', 'INTEGER NOT NULL DEFAULT 0'],
     ['orders', 'roast_record', "TEXT NOT NULL DEFAULT ''"],
+    ['orders', 'roast_revision', 'INTEGER NOT NULL DEFAULT 0'],
   ];
   for (const [table, column, definition] of additions) {
     const info = await db
@@ -41,6 +42,16 @@ async function upgradeCatalog(db: D1Database) {
     .run();
   await db
     .prepare(
+      'CREATE TABLE IF NOT EXISTS roast_machine_locks(machine TEXT PRIMARY KEY, batch_id TEXT NOT NULL)',
+    )
+    .run();
+  await db
+    .prepare(
+      "CREATE TRIGGER IF NOT EXISTS guard_roast_revision BEFORE UPDATE OF roast_revision ON orders WHEN NEW.roast_revision <> OLD.roast_revision + 1 BEGIN SELECT RAISE(ABORT, 'ROAST_CONFLICT'); END",
+    )
+    .run();
+  await db
+    .prepare(
       "CREATE TABLE IF NOT EXISTS bean_skus(id TEXT PRIMARY KEY NOT NULL,bean_id TEXT NOT NULL,label TEXT NOT NULL,harvest_year TEXT NOT NULL DEFAULT '',process TEXT NOT NULL DEFAULT '',altitude_m INTEGER NOT NULL DEFAULT 0,batch_code TEXT NOT NULL DEFAULT '',stock_grams INTEGER NOT NULL DEFAULT 0,is_demo INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,FOREIGN KEY(bean_id) REFERENCES beans(id))",
     )
     .run();
@@ -55,14 +66,14 @@ async function upgradeCatalog(db: D1Database) {
     )
     .run();
   for (const statement of [
+    "CREATE TRIGGER IF NOT EXISTS guard_stock_nonnegative BEFORE UPDATE OF stock_grams ON bean_skus WHEN NEW.stock_grams < 0 BEGIN SELECT RAISE(ABORT, 'STOCK_INSUFFICIENT'); END",
+    "CREATE TRIGGER IF NOT EXISTS guard_shipment_duplicate BEFORE INSERT ON shipments WHEN NEW.order_id <> '' AND EXISTS(SELECT 1 FROM shipments WHERE order_id=NEW.order_id) BEGIN SELECT RAISE(ABORT, 'SHIPMENT_DUPLICATE'); END",
     'CREATE INDEX IF NOT EXISTS idx_bean_skus_bean ON bean_skus(bean_id)',
     'CREATE INDEX IF NOT EXISTS idx_stock_movements_sku ON stock_movements(sku_id,occurred_at)',
     'CREATE INDEX IF NOT EXISTS idx_shipments_order ON shipments(order_id)',
     'CREATE INDEX IF NOT EXISTS idx_shipments_status ON shipments(status,shipped_at)',
   ])
     await db.prepare(statement).run();
-
-
 }
 export async function getD1() {
   if (!env.DB) throw new Error('Database unavailable');

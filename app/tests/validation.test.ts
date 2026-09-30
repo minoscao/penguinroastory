@@ -123,8 +123,15 @@ void test('曲线时间不能倒退、重复或从非零开始', () => {
       }),
     );
 });
-void test('拒绝空参数、非有限数值和超出范围的火力', () => {
-  for (const power of ['', NaN, 101, -1])
+void test('拒绝非有限数值和超出范围的火力，允许不记录火力', () => {
+  assert.equal(
+    profileInput({
+      ...profile,
+      points: profile.points.map((p) => ({ ...p, power: '' })),
+    }).points[0].power,
+    undefined,
+  );
+  for (const power of [NaN, 101, -1])
     assert.throws(() =>
       profileInput({
         ...profile,
@@ -187,19 +194,35 @@ void test('实际烘焙曲线支持温度与风门的一位小数，并允许风
       startedAt: Date.now(),
       machine: 'Sandouke 600',
       chargedGrams: 1000,
-      target: { temperature: '198.0', label: '一爆初段出豆', level: '浅烘焙', machine: 'Sandouke 600' },
+      target: {
+        temperature: '198.0',
+        label: '一爆初段出豆',
+        level: '浅烘焙',
+        machine: 'Sandouke 600',
+      },
       records: [{ stage: '回温', seconds: 95, temperature: 98.4, fan: 0.0 }],
     },
   });
-  assert.deepEqual(record.record.records[0], { stage: '回温', seconds: 95, temperature: 98.4, fan: 0 });
-  assert.throws(() => roastRecordInput({
-    ids: [crypto.randomUUID()],
-    record: {
-      startedAt: Date.now(), machine: 'Sandouke 600', chargedGrams: 1000,
-      target: { machine: 'Sandouke 600' },
-      records: [{ stage: '回温', seconds: 95, temperature: 98.44, fan: 10.1 }],
-    },
-  }));
+  assert.deepEqual(record.record.records[0], {
+    stage: '回温',
+    seconds: 95,
+    temperature: 98.4,
+    fan: 0,
+  });
+  assert.throws(() =>
+    roastRecordInput({
+      ids: [crypto.randomUUID()],
+      record: {
+        startedAt: Date.now(),
+        machine: 'Sandouke 600',
+        chargedGrams: 1000,
+        target: { machine: 'Sandouke 600' },
+        records: [
+          { stage: '回温', seconds: 95, temperature: 98.44, fan: 10.1 },
+        ],
+      },
+    }),
+  );
 });
 void test('状态必须按等待、烘焙、完成的顺序推进', () => {
   assert.equal(nextStatus('waiting', 'roasting'), 'roasting');

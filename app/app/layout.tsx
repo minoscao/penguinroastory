@@ -1,7 +1,8 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import './responsive.css';
 export const metadata: Metadata = {
-  metadataBase: new URL('https://penguinroastory.minoscao.chatgpt.site'),
+  metadataBase: new URL('https://roastory.mia-dynamic.com'),
   title: '企鹅烘焙 · 烘焙工作台',
   description: '记录客户、豆子和烘焙方案，轻松管理每一张烘焙订单。',
   openGraph: {
@@ -10,7 +11,7 @@ export const metadata: Metadata = {
     type: 'website',
     images: [
       {
-        url: 'https://penguinroastory.minoscao.chatgpt.site/og.png',
+        url: '/og.png',
         width: 1536,
         height: 1024,
         alt: '企鹅烘焙：认真烘焙，简单记录。',
@@ -19,7 +20,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary_large_image',
-    images: ['https://penguinroastory.minoscao.chatgpt.site/og.png'],
+    images: ['/og.png'],
     title: '企鹅烘焙 · 烘焙工作台',
     description: '认真烘焙，简单记录。',
   },

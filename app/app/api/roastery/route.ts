@@ -12,7 +12,6 @@ import {
   inventoryInput,
   shipmentInput,
   roastRecordInput,
-  nextStatus,
 } from '@/lib/validation';
 import type { Profile } from '@/lib/model';
 export const dynamic = 'force-dynamic';
@@ -46,6 +45,18 @@ function decodeOrder(row: Record<string, unknown>) {
 }
 function failure(e: unknown) {
   if (e instanceof InputError) return json({ error: e.message }, e.status);
+  const detail = e instanceof Error ? e.message : String(e);
+  if (detail.includes('ROAST_CONFLICT'))
+    return json(
+      { error: '另一台设备已更新这锅记录，请关闭并重新打开后继续。' },
+      409,
+    );
+  if (detail.includes('roast_machine_locks'))
+    return json({ error: '烘焙机已被另一锅占用，请刷新工作台。' }, 409);
+  if (detail.includes('STOCK_INSUFFICIENT'))
+    return json({ error: '库存不足，订单没有创建，请补充库存后重试。' }, 409);
+  if (detail.includes('SHIPMENT_DUPLICATE'))
+    return json({ error: '这张订单已登记发货，请刷新查看。' }, 409);
   console.error(
     'Roastery operation failed',
     e instanceof Error ? e.message : 'unknown',
@@ -65,7 +76,7 @@ async function body(request: Request) {
   if (!request.headers.get('content-type')?.includes('application/json'))
     throw new InputError('提交格式不正确。', 415);
   const raw = await request.text();
-  if (raw.length > 50000) throw new InputError('提交内容过长。', 413);
+  if (raw.length > 250000) throw new InputError('提交内容过长。', 413);
   try {
     return object(JSON.parse(raw));
   } catch (e) {
@@ -80,7 +91,10 @@ export async function GET(request: Request) {
     const kind = p.get('kind') || 'catalog';
     const source = p.get('source') || 'all';
     const date = text(p.get('date'), '日期', 10);
-    if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date))
+    if (
+      date &&
+      !/^\d{4}(?:-(?:0[1-9]|1[0-2])(?:-(?:0[1-9]|[12]\d|3[01]))?)?$/.test(date)
+    )
       throw new InputError('日期格式不正确。');
     if (!['all', 'real'].includes(source))
       throw new InputError('记录筛选无效。');
@@ -100,8 +114,8 @@ export async function GET(request: Request) {
             ' ORDER BY created_at DESC',
         ),
         db.prepare(
-          'SELECT * FROM profiles' +
-            (realOnly ? ' WHERE is_demo=0' : '') +
+          "SELECT * FROM profiles WHERE id NOT LIKE 'pending-profile-%'" +
+            (realOnly ? ' AND is_demo=0' : '') +
             ' ORDER BY updated_at DESC',
         ),
         db.prepare(
@@ -131,17 +145,46 @@ export async function GET(request: Request) {
       });
     }
     if (kind === 'operations') {
-      const orderDate = date ? ' AND substr(created_at,1,10)=?' : '';
-      const shipmentDate = date
-        ? (realOnly
-            ? ' AND substr(s.shipped_at,1,10)=?'
-            : ' WHERE substr(s.shipped_at,1,10)=?')
+      const orderDate = date
+        ? " AND (status='roasting' OR date(created_at,'+8 hours') LIKE ?)"
         : '';
-      const [active, completed, shipments, movements] = await db.batch<Record<string, unknown>>([
-        db.prepare("SELECT * FROM orders WHERE status IN ('waiting','roasting')" + (realOnly ? ' AND is_demo=0' : '') + orderDate + ' ORDER BY due_date ASC,created_at ASC LIMIT 300').bind(...(date ? [date] : [])),
-        db.prepare("SELECT * FROM orders WHERE status='completed'" + (realOnly ? ' AND is_demo=0' : '') + orderDate + ' ORDER BY completed_at DESC LIMIT 300').bind(...(date ? [date] : [])),
-        db.prepare('SELECT s.*,o.code AS order_code,o.bean_name,o.quantity_grams FROM shipments s LEFT JOIN orders o ON o.id=s.order_id' + (realOnly ? ' WHERE (s.is_sample=1 OR o.is_demo=0)' : '') + shipmentDate + ' ORDER BY s.shipped_at DESC LIMIT 300').bind(...(date ? [date] : [])),
-        db.prepare('SELECT m.*,s.label AS sku_label,b.name AS bean_name FROM stock_movements m JOIN bean_skus s ON s.id=m.sku_id JOIN beans b ON b.id=s.bean_id' + (realOnly ? ' WHERE s.is_demo=0' : '') + ' ORDER BY m.occurred_at DESC LIMIT 80'),
+      const shipmentDate = date
+        ? realOnly
+          ? " AND date(s.shipped_at,'+8 hours') LIKE ?"
+          : " WHERE date(s.shipped_at,'+8 hours') LIKE ?"
+        : '';
+      const [active, completed, shipments, movements] = await db.batch<
+        Record<string, unknown>
+      >([
+        db
+          .prepare(
+            "SELECT * FROM orders WHERE status IN ('waiting','roasting')" +
+              (realOnly ? ' AND is_demo=0' : '') +
+              orderDate +
+              ' ORDER BY due_date ASC,created_at ASC LIMIT 300',
+          )
+          .bind(...(date ? [date + '%'] : [])),
+        db
+          .prepare(
+            "SELECT * FROM orders WHERE status='completed' AND NOT EXISTS(SELECT 1 FROM shipments WHERE shipments.order_id=orders.id)" +
+              (realOnly ? ' AND is_demo=0' : '') +
+              (date ? " AND date(completed_at,'+8 hours') LIKE ?" : '') +
+              ' ORDER BY completed_at DESC LIMIT 300',
+          )
+          .bind(...(date ? [date + '%'] : [])),
+        db
+          .prepare(
+            'SELECT s.*,o.code AS order_code,o.bean_name,o.quantity_grams FROM shipments s LEFT JOIN orders o ON o.id=s.order_id' +
+              (realOnly ? ' WHERE (s.is_sample=1 OR o.is_demo=0)' : '') +
+              shipmentDate +
+              ' ORDER BY s.shipped_at DESC LIMIT 300',
+          )
+          .bind(...(date ? [date + '%'] : [])),
+        db.prepare(
+          'SELECT m.*,s.label AS sku_label,b.name AS bean_name FROM stock_movements m JOIN bean_skus s ON s.id=m.sku_id JOIN beans b ON b.id=s.bean_id' +
+            (realOnly ? ' WHERE s.is_demo=0' : '') +
+            ' ORDER BY m.occurred_at DESC LIMIT 80',
+        ),
       ]);
       return json({
         active_orders: active.results.map(decodeOrder),
@@ -176,9 +219,9 @@ export async function GET(request: Request) {
     if (realOnly) conditions.push('is_demo=0');
     if (date) {
       conditions.push(
-        `substr(${status === 'completed' ? 'completed_at' : 'created_at'},1,10)=?`,
+        `date(${p.get('date_field') === 'completed' ? 'completed_at' : 'created_at'},'+8 hours') LIKE ?`,
       );
-      bindings.push(date);
+      bindings.push(date + '%');
     }
     const customerId = text(p.get('customer_id'), '客户', 80);
     if (customerId) {
@@ -271,11 +314,36 @@ export async function POST(request: Request) {
     }
     if (b.kind === 'sku') {
       const x = skuInput(b);
-      const sourceBean = await db.prepare('SELECT is_demo FROM beans WHERE id=?').bind(x.bean_id).first<{ is_demo: number }>();
+      const sourceBean = await db
+        .prepare('SELECT is_demo FROM beans WHERE id=?')
+        .bind(x.bean_id)
+        .first<{ is_demo: number }>();
       if (!sourceBean) throw new InputError('请先保存这款豆子。');
-      await db.prepare('INSERT INTO bean_skus(id,bean_id,label,harvest_year,process,altitude_m,batch_code,stock_grams,is_demo,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(id, x.bean_id, x.label, x.harvest_year, x.process, x.altitude_m, x.batch_code, x.stock_grams, sourceBean.is_demo || 0, now, now).run();
+      await db
+        .prepare(
+          'INSERT INTO bean_skus(id,bean_id,label,harvest_year,process,altitude_m,batch_code,stock_grams,is_demo,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+        )
+        .bind(
+          id,
+          x.bean_id,
+          x.label,
+          x.harvest_year,
+          x.process,
+          x.altitude_m,
+          x.batch_code,
+          x.stock_grams,
+          sourceBean.is_demo || 0,
+          now,
+          now,
+        )
+        .run();
       if (x.stock_grams > 0)
-        await db.prepare("INSERT INTO stock_movements(id,sku_id,movement_type,delta_grams,reference_id,notes,occurred_at) VALUES(?,?,'in',?,'','创建批次时录入',?)").bind('stock-'+id, id, x.stock_grams, now).run();
+        await db
+          .prepare(
+            "INSERT INTO stock_movements(id,sku_id,movement_type,delta_grams,reference_id,notes,occurred_at) VALUES(?,?,'in',?,'','创建批次时录入',?)",
+          )
+          .bind('stock-' + id, id, x.stock_grams, now)
+          .run();
       return json({ id }, 201);
     }
     if (b.kind === 'profile') {
@@ -308,25 +376,58 @@ export async function POST(request: Request) {
     if (b.kind === 'inventory') {
       const x = inventoryInput(b);
       if (x.delta_grams === 0) throw new InputError('库存变动不能为 0。');
-      const sku = await db.prepare('SELECT stock_grams FROM bean_skus WHERE id=?').bind(x.sku_id).first<{ stock_grams: number }>();
+      const sku = await db
+        .prepare('SELECT stock_grams FROM bean_skus WHERE id=?')
+        .bind(x.sku_id)
+        .first<{ stock_grams: number }>();
       if (!sku) throw new InputError('找不到这个豆子批次。', 404);
-      if (Number(sku.stock_grams) + x.delta_grams < 0) throw new InputError('调整后的库存不能小于 0。');
+      if (Number(sku.stock_grams) + x.delta_grams < 0)
+        throw new InputError('调整后的库存不能小于 0。');
       const movementType = x.delta_grams > 0 ? 'in' : 'adjustment';
       await db.batch([
-        db.prepare('UPDATE bean_skus SET stock_grams=stock_grams+?,updated_at=? WHERE id=?').bind(x.delta_grams, now, x.sku_id),
-        db.prepare('INSERT INTO stock_movements(id,sku_id,movement_type,delta_grams,reference_id,notes,occurred_at) VALUES(?,?,?,?,?,?,?)').bind(id, x.sku_id, movementType, x.delta_grams, '', x.notes, now),
+        db
+          .prepare(
+            'UPDATE bean_skus SET stock_grams=stock_grams+?,updated_at=? WHERE id=?',
+          )
+          .bind(x.delta_grams, now, x.sku_id),
+        db
+          .prepare(
+            'INSERT INTO stock_movements(id,sku_id,movement_type,delta_grams,reference_id,notes,occurred_at) VALUES(?,?,?,?,?,?,?)',
+          )
+          .bind(id, x.sku_id, movementType, x.delta_grams, '', x.notes, now),
       ]);
       return json({ id }, 201);
     }
     if (b.kind === 'shipment') {
       const x = shipmentInput(b);
       if (x.order_id) {
-        const order = await db.prepare("SELECT id FROM orders WHERE id=? AND status='completed'").bind(x.order_id).first();
+        const order = await db
+          .prepare("SELECT id FROM orders WHERE id=? AND status='completed'")
+          .bind(x.order_id)
+          .first();
         if (!order) throw new InputError('这张订单还没有完成烘焙。');
-        const existingShipment = await db.prepare('SELECT id FROM shipments WHERE order_id=?').bind(x.order_id).first();
-        if (existingShipment) throw new InputError('这张订单已经登记过发货。');
+        const existingShipment = await db
+          .prepare('SELECT id FROM shipments WHERE order_id=?')
+          .bind(x.order_id)
+          .first();
+        if (existingShipment)
+          throw new InputError('这张订单已经登记过发货。', 409);
       }
-      await db.prepare("INSERT INTO shipments(id,order_id,customer_name,carrier,tracking_number,status,is_sample,notes,shipped_at) VALUES(?,?,?,?,?,'shipped',?,?,?)").bind(id, x.order_id, x.customer_name, x.carrier, x.tracking_number, x.is_sample, x.notes, now).run();
+      await db
+        .prepare(
+          "INSERT INTO shipments(id,order_id,customer_name,carrier,tracking_number,status,is_sample,notes,shipped_at) VALUES(?,?,?,?,?,'shipped',?,?,?)",
+        )
+        .bind(
+          id,
+          x.order_id,
+          x.customer_name,
+          x.carrier,
+          x.tracking_number,
+          x.is_sample,
+          x.notes,
+          now,
+        )
+        .run();
       return json({ id }, 201);
     }
     if (b.kind !== 'order') throw new InputError('未找到这个功能。', 404);
@@ -366,9 +467,14 @@ export async function POST(request: Request) {
             .first()
         : Promise.resolve(null),
       x.sku_id
-        ? db.prepare('SELECT * FROM bean_skus WHERE id=? AND bean_id=?').bind(x.sku_id, x.bean_id).first()
+        ? db
+            .prepare('SELECT * FROM bean_skus WHERE id=? AND bean_id=?')
+            .bind(x.sku_id, x.bean_id)
+            .first()
         : db
-            .prepare('SELECT * FROM bean_skus WHERE bean_id=? AND stock_grams>=? ORDER BY stock_grams DESC LIMIT 1')
+            .prepare(
+              'SELECT * FROM bean_skus WHERE bean_id=? AND stock_grams>=? ORDER BY stock_grams DESC LIMIT 1',
+            )
             .bind(x.bean_id, x.quantity_grams)
             .first(),
     ]);
@@ -401,8 +507,22 @@ export async function POST(request: Request) {
       x.id.replaceAll('-', '').slice(0, 8).toUpperCase();
     if (!profileRow)
       await db
-        .prepare('INSERT OR IGNORE INTO profiles(id,bean_id,name,roast_level,machine,batch_grams,points,notes,revision,is_demo,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,1,?,?,?)')
-        .bind(profile.id, x.bean_id, profile.name, profile.roast_level, '', 1, '[]', profile.notes, profile.is_demo, now, now)
+        .prepare(
+          'INSERT OR IGNORE INTO profiles(id,bean_id,name,roast_level,machine,batch_grams,points,notes,revision,is_demo,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,1,?,?,?)',
+        )
+        .bind(
+          profile.id,
+          x.bean_id,
+          profile.name,
+          profile.roast_level,
+          '',
+          1,
+          '[]',
+          profile.notes,
+          profile.is_demo,
+          now,
+          now,
+        )
         .run();
     const inserted = await db.batch<Record<string, unknown>>([
       db
@@ -429,8 +549,23 @@ export async function POST(request: Request) {
           now,
           now,
         ),
-      db.prepare('UPDATE bean_skus SET stock_grams=stock_grams-?,updated_at=? WHERE id=? AND stock_grams>=?').bind(x.quantity_grams, now, sku.id, x.quantity_grams),
-      db.prepare("INSERT OR IGNORE INTO stock_movements(id,sku_id,movement_type,delta_grams,reference_id,notes,occurred_at) VALUES(?,?,'order',?,?,?,?)").bind('stock-'+x.id, sku.id, -x.quantity_grams, x.id, '创建订单自动扣减', now),
+      db
+        .prepare(
+          'UPDATE bean_skus SET stock_grams=stock_grams-?,updated_at=? WHERE id=? AND NOT EXISTS(SELECT 1 FROM stock_movements WHERE id=?)',
+        )
+        .bind(x.quantity_grams, now, sku.id, 'stock-' + x.id),
+      db
+        .prepare(
+          "INSERT OR IGNORE INTO stock_movements(id,sku_id,movement_type,delta_grams,reference_id,notes,occurred_at) VALUES(?,?,'order',?,?,?,?)",
+        )
+        .bind(
+          'stock-' + x.id,
+          sku.id,
+          -x.quantity_grams,
+          x.id,
+          '创建订单自动扣减',
+          now,
+        ),
       db
         .prepare(
           "INSERT OR IGNORE INTO order_events(id,order_id,status,occurred_at) VALUES(?,?,'waiting',?)",
@@ -449,70 +584,162 @@ export async function PATCH(request: Request) {
     const b = await body(request);
     const db = await getD1();
     const now = new Date().toISOString();
-    if (b.kind === 'roast-record') {
+    if (
+      ['roast-start', 'roast-record', 'roast-finish'].includes(String(b.kind))
+    ) {
       const x = roastRecordInput(b);
+      const expectedRevision = number(
+        b.expected_revision ?? 0,
+        '曲线版本',
+        0,
+        100000,
+        true,
+      );
       const rows = await db
         .prepare(
-          'SELECT id FROM orders WHERE id IN (' + x.ids.map(() => '?').join(',') + ')',
+          'SELECT * FROM orders WHERE id IN (' +
+            x.ids.map(() => '?').join(',') +
+            ')',
         )
         .bind(...x.ids)
-        .all<{ id: string }>();
+        .all<Record<string, unknown>>();
       if (rows.results.length !== x.ids.length)
         throw new InputError('有订单不存在，无法保存这锅的曲线。', 404);
-      const payload = JSON.stringify(x.record);
-      const results = await db.batch(
-        x.ids.map((orderId) =>
+      if (
+        rows.results.some(
+          (row) => Number(row.roast_revision) !== expectedRevision,
+        )
+      )
+        throw new InputError(
+          '另一台设备已更新这锅记录，请关闭并重新打开后继续。',
+          409,
+        );
+      const starting = b.kind === 'roast-start';
+      const finishing = b.kind === 'roast-finish';
+      if (starting && rows.results.some((row) => row.status !== 'waiting'))
+        throw new InputError('订单已经开始，请刷新后继续当前烘焙。', 409);
+      if (!starting && rows.results.some((row) => row.status === 'waiting'))
+        throw new InputError('请先准备入豆并开始录豆。', 409);
+      if (finishing && rows.results.some((row) => row.status !== 'roasting'))
+        throw new InputError('这锅已经完成，请刷新查看。', 409);
+      const storedRecord = rows.results[0].roast_record;
+      const previous =
+        typeof storedRecord === 'string' && storedRecord
+          ? JSON.parse(storedRecord)
+          : null;
+      const linkedIds: string[] = previous?.orderIds || x.ids;
+      if (
+        !starting &&
+        (linkedIds.length !== x.ids.length ||
+          linkedIds.some((id) => !x.ids.includes(id)))
+      )
+        throw new InputError(
+          '请从烘焙工作台打开整锅记录，合并订单需要一起保存。',
+          409,
+        );
+      let referenceProfile = previous?.referenceProfile;
+      if (starting) {
+        if (new Set(rows.results.map((row) => row.bean_id)).size !== 1)
+          throw new InputError('一锅只能合并相同豆子的订单。');
+        const active = await db
+          .prepare("SELECT id FROM orders WHERE status='roasting' LIMIT 1")
+          .first();
+        if (active)
+          throw new InputError('烘焙机正在使用，请先完成当前这一锅。', 409);
+        if (x.record.target.profileId) {
+          const selected = await db
+            .prepare('SELECT * FROM profiles WHERE id=? AND bean_id=?')
+            .bind(x.record.target.profileId, rows.results[0].bean_id)
+            .first();
+          if (!selected)
+            throw new InputError('所选方案已变化，请重新选择。', 409);
+          referenceProfile = decodeProfile(selected);
+        }
+        if (
+          !x.record.records.some(
+            (point) => point.stage === '入豆' && point.seconds === 0,
+          ) ||
+          x.record.chargedGrams <= 0
+        )
+          throw new InputError('请填写入豆温度和克重，入豆时间应为 0:00。');
+      }
+      const record = {
+        ...x.record,
+        orderIds: x.ids,
+        ...(referenceProfile ? { referenceProfile } : {}),
+      };
+      const payload = JSON.stringify(record);
+      const statements: D1PreparedStatement[] = [];
+      if (starting)
+        statements.push(
           db
-            .prepare('UPDATE orders SET roast_record=?,updated_at=? WHERE id=?')
-            .bind(payload, now, orderId),
-        ),
-      );
-      if (!results.every((result) => result.meta.changes))
-        throw new InputError('曲线记录已变化，请刷新后再保存。', 409);
-      return json({ updated: x.ids.length });
+            .prepare(
+              'INSERT INTO roast_machine_locks(machine,batch_id) VALUES(?,?)',
+            )
+            .bind('single-roaster', [...x.ids].sort().join(',')),
+        );
+      for (const orderId of x.ids) {
+        statements.push(
+          db
+            .prepare(
+              'UPDATE orders SET roast_record=?,roast_revision=?,updated_at=? WHERE id=?',
+            )
+            .bind(payload, expectedRevision + 1, now, orderId),
+        );
+        if (starting || finishing) {
+          const status = starting ? 'roasting' : 'completed';
+          statements.push(
+            db
+              .prepare(
+                `UPDATE orders SET status=?,${starting ? 'started_at' : 'completed_at'}=? WHERE id=?`,
+              )
+              .bind(
+                status,
+                starting ? new Date(x.record.startedAt).toISOString() : now,
+                orderId,
+              ),
+          );
+          statements.push(
+            db
+              .prepare(
+                'INSERT INTO order_events(id,order_id,status,occurred_at) VALUES(?,?,?,?)',
+              )
+              .bind(crypto.randomUUID(), orderId, status, now),
+          );
+        }
+      }
+      if (finishing)
+        statements.push(
+          db
+            .prepare('DELETE FROM roast_machine_locks WHERE machine=?')
+            .bind('single-roaster'),
+        );
+      await db.batch(statements);
+      return json({
+        updated: x.ids.length,
+        revision: expectedRevision + 1,
+        record,
+      });
     }
     const id = text(b.id, '记录', 80, true);
     if (b.kind === 'shipment-status') {
       const target = text(b.status, '物流状态', 20, true);
       if (target !== 'delivered') throw new InputError('物流状态无效。');
-      const r = await db.prepare("UPDATE shipments SET status='delivered',delivered_at=? WHERE id=? AND status='shipped'").bind(now, id).run();
-      if (!r.meta.changes) throw new InputError('发货记录已变化，请刷新。', 409);
+      const r = await db
+        .prepare(
+          "UPDATE shipments SET status='delivered',delivered_at=? WHERE id=? AND status='shipped'",
+        )
+        .bind(now, id)
+        .run();
+      if (!r.meta.changes)
+        throw new InputError('发货记录已变化，请刷新。', 409);
       return json({ id, status: target });
     }
-    if (b.kind === 'batch-status') {
-      if (!Array.isArray(b.ids) || !b.ids.length || b.ids.length > 100) throw new InputError('请选择需要处理的订单。');
-      const target = text(b.status, '订单状态', 20, true);
-      if (!['roasting', 'completed'].includes(target)) throw new InputError('订单状态无效。');
-      const ids = b.ids.map((value) => text(value, '订单', 80, true));
-      if (target === 'roasting') {
-        const other = await db
-          .prepare(
-            'SELECT code FROM orders WHERE status=? AND id NOT IN (' +
-              ids.map(() => '?').join(',') +
-              ') LIMIT 1',
-          )
-          .bind('roasting', ...ids)
-          .first<{ code: string }>();
-        if (other)
-          throw new InputError(
-            `Sandouke 600 正在烘焙 ${other.code}，请结束当前这一锅后再开始下一锅。`,
-            409,
-          );
-      }
-      const expected = target === 'roasting' ? 'waiting' : 'roasting';
-      const timestamp = target === 'roasting' ? 'started_at' : 'completed_at';
-      const statements = ids.flatMap((orderId) => {
-        const eventId = crypto.randomUUID();
-        return [
-          db.prepare('UPDATE orders SET status=?,' + timestamp + '=?,updated_at=?,last_transition_id=? WHERE id=? AND status=?').bind(target, now, now, eventId, orderId, expected),
-          db.prepare('INSERT INTO order_events(id,order_id,status,occurred_at) SELECT ?,id,?,? FROM orders WHERE id=? AND last_transition_id=?').bind(eventId, target, now, orderId, eventId),
-        ];
-      });
-      const results = await db.batch(statements);
-      const changed = results.filter((_, index) => index % 2 === 0).reduce((n, r) => n + Number(r.meta.changes), 0);
-      if (!changed) throw new InputError('订单进度已变化，请刷新后再操作。', 409);
-      return json({ changed, status: target });
-    }
+    if (b.kind === 'batch-status' || b.kind === 'status')
+      throw new InputError(
+        '请通过烘焙记录台开始或完成烘焙，确保曲线与订单一起保存。',
+        409,
+      );
     if (b.kind === 'customer') {
       const x = customerInput(b);
       const r = await db
@@ -569,47 +796,7 @@ export async function PATCH(request: Request) {
         throw new InputError('这套方案已被修改，请关闭后重新打开。', 409);
       return json({ id });
     }
-    if (b.kind !== 'status') throw new InputError('未找到这个功能。', 404);
-    const target = text(b.status, '订单状态', 20, true);
-    if (!['roasting', 'completed'].includes(target))
-      throw new InputError('订单状态无效。');
-    const current = await db
-      .prepare('SELECT status FROM orders WHERE id=?')
-      .bind(id)
-      .first<{ status: string }>();
-    if (!current) throw new InputError('订单不存在。', 404);
-    if (target === 'roasting') {
-      const other = await db
-        .prepare('SELECT code FROM orders WHERE status=? AND id<>? LIMIT 1')
-        .bind('roasting', id)
-        .first<{ code: string }>();
-      if (other)
-        throw new InputError(
-          `Sandouke 600 正在烘焙 ${other.code}，请结束当前这一锅后再开始下一锅。`,
-          409,
-        );
-    }
-    if (current.status === target) return json({ id });
-    nextStatus(current.status, target);
-    const transitionId = crypto.randomUUID();
-    const timestamp = target === 'roasting' ? 'started_at' : 'completed_at';
-    const results = await db.batch<Record<string, unknown>>([
-      db
-        .prepare(
-          'UPDATE orders SET status=?,' +
-            timestamp +
-            '=?,updated_at=?,last_transition_id=? WHERE id=? AND status=?',
-        )
-        .bind(target, now, now, transitionId, id, current.status),
-      db
-        .prepare(
-          'INSERT INTO order_events(id,order_id,status,occurred_at) SELECT ?,id,status,updated_at FROM orders WHERE id=? AND last_transition_id=?',
-        )
-        .bind(transitionId, id, transitionId),
-    ]);
-    if (!results[0].meta.changes)
-      throw new InputError('订单进度已变化，请刷新后再操作。', 409);
-    return json({ id, status: target });
+    throw new InputError('未找到这个功能。', 404);
   } catch (e) {
     return failure(e);
   }
@@ -631,7 +818,10 @@ export async function DELETE(request: Request) {
           `客户已有订单 ${order.code}，为了保留订单追溯，暂时不能删除。`,
           409,
         );
-      const result = await db.prepare('DELETE FROM customers WHERE id=?').bind(id).run();
+      const result = await db
+        .prepare('DELETE FROM customers WHERE id=?')
+        .bind(id)
+        .run();
       if (!result.meta.changes) throw new InputError('客户档案不存在。', 404);
       return json({ id });
     }
@@ -659,7 +849,8 @@ export async function DELETE(request: Request) {
         db.prepare('DELETE FROM beans WHERE id=?').bind(id),
       ];
       const results = await db.batch(statements);
-      if (!results.at(-1)?.meta.changes) throw new InputError('豆子档案不存在。', 404);
+      if (!results.at(-1)?.meta.changes)
+        throw new InputError('豆子档案不存在。', 404);
       return json({ id });
     }
     throw new InputError('这个档案暂不支持删除。', 404);

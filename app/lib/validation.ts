@@ -105,7 +105,13 @@ export function skuInput(v: unknown) {
     process: text(b.process, '处理法', 100),
     altitude_m: number(b.altitude_m || 0, '海拔', 0, 10000, true),
     batch_code: text(b.batch_code, '批次编号', 80),
-    stock_grams: number(b.stock_grams || 0, '初始库存（克）', 0, 100000000, true),
+    stock_grams: number(
+      b.stock_grams || 0,
+      '初始库存（克）',
+      0,
+      100000000,
+      true,
+    ),
   };
 }
 export function profileInput(v: unknown) {
@@ -123,8 +129,12 @@ export function profileInput(v: unknown) {
       stage: text(p.stage, '阶段名称', 30, true),
       seconds,
       temperature: number(p.temperature, '豆温（℃）', 0, 350),
-      power: number(p.power, '火力（%）', 0, 100),
-      fan: number(p.fan, '风门（%）', 0, 100),
+      ...(p.power === '' || p.power === undefined || p.power === null
+        ? {}
+        : { power: number(p.power, '火力（%）', 0, 100) }),
+      ...(p.fan === '' || p.fan === undefined || p.fan === null
+        ? {}
+        : { fan: number(p.fan, '风门（%）', 0, 100) }),
     };
   });
   return {
@@ -164,7 +174,13 @@ export function inventoryInput(v: unknown) {
   const b = object(v);
   return {
     sku_id: text(b.sku_id, '豆子批次', 80, true),
-    delta_grams: number(b.delta_grams, '库存变动重量（克）', -100000000, 100000000, true),
+    delta_grams: number(
+      b.delta_grams,
+      '库存变动重量（克）',
+      -100000000,
+      100000000,
+      true,
+    ),
     notes: text(b.notes, '库存备注', 500),
   };
 }
@@ -192,11 +208,16 @@ export function roastRecordInput(v: unknown) {
   if (new Set(ids).size !== ids.length) throw new InputError('订单不能重复。');
   const record = object(b.record);
   const target = object(record.target);
-  if (!Array.isArray(record.records) || record.records.length > 100)
+  if (!Array.isArray(record.records) || record.records.length > 1000)
     throw new InputError('烘焙记录点数量不正确。');
   const records = record.records.map((raw, index) => {
     const point = object(raw);
-    const temperature = number(point.temperature, `第 ${index + 1} 个温度`, 0, 350);
+    const temperature = number(
+      point.temperature,
+      `第 ${index + 1} 个温度`,
+      0,
+      350,
+    );
     const fan =
       point.fan === undefined || point.fan === null
         ? undefined
@@ -218,7 +239,13 @@ export function roastRecordInput(v: unknown) {
     record: {
       startedAt: number(record.startedAt, '开始时间', 0, 4102444800000, true),
       machine: text(record.machine, '烘焙机', 100, true),
-      chargedGrams: number(record.chargedGrams, '投豆量（克）', 0, 100000, true),
+      chargedGrams: number(
+        record.chargedGrams,
+        '投豆量（克）',
+        0,
+        100000,
+        true,
+      ),
       target: {
         temperature: text(target.temperature, '目标出豆温度', 20),
         label: text(target.label, '目标出豆位置', 50),

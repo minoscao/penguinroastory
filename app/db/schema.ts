@@ -97,9 +97,7 @@ export const orders = sqliteTable(
     profile_snapshot: text('profile_snapshot').notNull(),
     quantity_grams: integer('quantity_grams').notNull(),
     batch_count: integer('batch_count').notNull().default(1),
-    stock_deducted_grams: integer('stock_deducted_grams')
-      .notNull()
-      .default(0),
+    stock_deducted_grams: integer('stock_deducted_grams').notNull().default(0),
     due_date: text('due_date').notNull().default(''),
     notes: text('notes').notNull().default(''),
     status: text('status').notNull().default('waiting'),
@@ -107,6 +105,7 @@ export const orders = sqliteTable(
     started_at: text('started_at'),
     completed_at: text('completed_at'),
     roast_record: text('roast_record').notNull().default(''),
+    roast_revision: integer('roast_revision').notNull().default(0),
     updated_at: text('updated_at').notNull(),
     last_transition_id: text('last_transition_id'),
   },
