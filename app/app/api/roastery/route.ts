@@ -1,4 +1,6 @@
 import { getD1 } from '@/db';
+import { currentUser, requirePermission } from '@/lib/auth';
+import { can, mutationPermission } from '@/lib/permissions';
 import {
   InputError,
   object,
@@ -86,6 +88,7 @@ async function body(request: Request) {
 }
 export async function GET(request: Request) {
   try {
+    const user = await currentUser(request);
     const db = await getD1();
     const p = new URL(request.url).searchParams;
     const kind = p.get('kind') || 'catalog';
@@ -133,18 +136,60 @@ export async function GET(request: Request) {
         ),
       ]);
       return json({
-        customers: customers.results,
-        beans: beans.results,
-        profiles: profiles.results.map(decodeProfile),
-        skus: skus.results,
-        demo_counts: demo.results[0],
-        stats: Object.assign(
-          { waiting: 0, roasting: 0, completed: 0 },
-          Object.fromEntries(stats.results.map((r) => [r.status, r.count])),
-        ),
+        customers: can(user, 'customers.view')
+          ? customers.results
+          : can(user, 'orders.manage') || can(user, 'shipping.view')
+            ? customers.results.map((c) => ({
+                id: c.id,
+                name: c.name,
+                customer_type: c.customer_type,
+                contact: '',
+                phone: '',
+                notes: '',
+                created_at: '',
+                updated_at: '',
+              }))
+            : [],
+        beans: [
+          'beans.view',
+          'orders.manage',
+          'roasting.view',
+          'inventory.view',
+        ].some((p) => can(user, p as 'beans.view'))
+          ? beans.results
+          : [],
+        profiles: ['beans.view', 'orders.manage', 'roasting.view'].some((p) =>
+          can(user, p as 'beans.view'),
+        )
+          ? profiles.results.map(decodeProfile)
+          : [],
+        skus: [
+          'beans.view',
+          'orders.manage',
+          'roasting.view',
+          'inventory.view',
+        ].some((p) => can(user, p as 'beans.view'))
+          ? skus.results
+          : [],
+        demo_counts: user.role === 'admin' ? demo.results[0] : undefined,
+        stats:
+          can(user, 'orders.view') || can(user, 'roasting.view')
+            ? Object.assign(
+                { waiting: 0, roasting: 0, completed: 0 },
+                Object.fromEntries(
+                  stats.results.map((r) => [r.status, r.count]),
+                ),
+              )
+            : { waiting: 0, roasting: 0, completed: 0 },
       });
     }
     if (kind === 'operations') {
+      requirePermission(
+        user,
+        'roasting.view',
+        'shipping.view',
+        'inventory.view',
+      );
       const orderDate = date
         ? " AND (status='roasting' OR date(created_at,'+8 hours') LIKE ?)"
         : '';
@@ -187,13 +232,23 @@ export async function GET(request: Request) {
         ),
       ]);
       return json({
-        active_orders: active.results.map(decodeOrder),
-        completed_orders: completed.results.map(decodeOrder),
-        shipments: shipments.results,
-        movements: movements.results,
+        active_orders: can(user, 'roasting.view')
+          ? active.results.map(decodeOrder)
+          : can(user, 'inventory.view')
+            ? active.results.map((r) => ({
+                sku_id: r.sku_id,
+                stock_deducted_grams: r.stock_deducted_grams,
+              }))
+            : [],
+        completed_orders: can(user, 'shipping.view')
+          ? completed.results.map(decodeOrder)
+          : [],
+        shipments: can(user, 'shipping.view') ? shipments.results : [],
+        movements: can(user, 'inventory.view') ? movements.results : [],
       });
     }
     if (kind === 'detail') {
+      requirePermission(user, 'orders.view', 'roasting.view');
       const id = text(p.get('id'), '订单', 80, true);
       const order = await db
         .prepare('SELECT * FROM orders WHERE id=?')
@@ -209,6 +264,7 @@ export async function GET(request: Request) {
       return json({ order: decodeOrder(order), events: events.results });
     }
     if (kind !== 'orders') throw new InputError('未找到这个功能。', 404);
+    requirePermission(user, 'orders.view');
     const status = p.get('status') || 'all';
     if (!['all', 'waiting', 'roasting', 'completed'].includes(status))
       throw new InputError('订单状态无效。');
@@ -268,7 +324,11 @@ export async function GET(request: Request) {
 }
 export async function POST(request: Request) {
   try {
+    const user = await currentUser(request);
     const b = await body(request);
+    const permission = mutationPermission(String(b.kind), 'POST');
+    if (!permission) throw new InputError('未授权的操作。', 403);
+    requirePermission(user, permission);
     const db = await getD1();
     const now = new Date().toISOString();
     const id = crypto.randomUUID();
@@ -581,7 +641,11 @@ export async function POST(request: Request) {
 }
 export async function PATCH(request: Request) {
   try {
+    const user = await currentUser(request);
     const b = await body(request);
+    const permission = mutationPermission(String(b.kind), 'PATCH');
+    if (!permission) throw new InputError('未授权的操作。', 403);
+    requirePermission(user, permission);
     const db = await getD1();
     const now = new Date().toISOString();
     if (
@@ -804,7 +868,11 @@ export async function PATCH(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
+    const user = await currentUser(request);
     const b = await body(request);
+    const permission = mutationPermission(String(b.kind), 'DELETE');
+    if (!permission) throw new InputError('未授权的操作。', 403);
+    requirePermission(user, permission);
     const db = await getD1();
     const id = text(b.id, '档案', 80, true);
     const kind = text(b.kind, '档案类型', 20, true);

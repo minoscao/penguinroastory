@@ -42,7 +42,9 @@ import {
   CalendarDays,
   Trash2,
 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { PermissionButton as Button } from '@/components/permission-button';
+import { useAuth, SessionBar } from '@/components/auth-provider';
+import { routePermission, mutationPermission } from '@/lib/permissions';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { NativeSelect } from '@/components/ui/native-select';
@@ -81,6 +83,13 @@ import OperationsPanel from '@/components/operations';
 // Operational screens must remain reachable even when optional route prefetching
 // is unavailable on a deployed device.
 function Link({ children, ...props }: ComponentProps<'a'>) {
+  const { can } = useAuth();
+  if (
+    props.href &&
+    routePermission[props.href] &&
+    !can(routePermission[props.href])
+  )
+    return null;
   return <a {...props}>{children}</a>;
 }
 
@@ -134,7 +143,7 @@ const views: Record<
     eyebrow: 'PACK & DELIVER',
   },
   admin: {
-    title: '管理总览',
+    title: '库存管理',
     subtitle: '库存、订单占用和最近变动，在一个地方看清楚。',
     eyebrow: 'ROASTERY CONTROL',
   },
@@ -169,6 +178,8 @@ async function request<T = Record<string, unknown>>(
   } catch {
     throw new Error('暂时无法连接，请稍后重试。');
   }
+  if (response.status === 401)
+    window.dispatchEvent(new Event('roastory-auth-change'));
   if (!response.ok)
     throw new Error(
       data && typeof data === 'object' && 'error' in data
@@ -631,6 +642,7 @@ function CustomerTable({
               </td>
               <td className="customer-table-action">
                 <Button
+                  permission={['customers.manage', 'customers.delete']}
                   variant="ghost"
                   size="sm"
                   onClick={() => onEdit(customer)}
@@ -647,6 +659,54 @@ function CustomerTable({
 }
 
 function Dashboard({ catalog }: { catalog: Catalog | null }) {
+  const { user, can } = useAuth();
+  if (user?.role === 'employee')
+    return (
+      <div className="dashboard-grid">
+        <section className="dashboard-hero">
+          <div>
+            <p className="eyebrow">PENGUIN ROASTORY</p>
+            <h2>{user.name}的工作台</h2>
+            <p>下方显示已授权的业务入口。需要其他功能时，请联系管理员。</p>
+          </div>
+        </section>
+        <section className="dashboard-section panel">
+          <div className="panel-heading">
+            <h2>我的业务</h2>
+          </div>
+          <div className="dashboard-actions">
+            {Object.entries(routePermission)
+              .filter(
+                ([path, permission]) =>
+                  path !== '/completed' && can(permission),
+              )
+              .map(([path]) => (
+                <Link key={path} href={path}>
+                  <div>
+                    <strong>
+                      {
+                        {
+                          '/orders': '订单档案',
+                          '/roasting': '烘焙工作台',
+                          '/fulfillment': '发货工作台',
+                          '/beans': '豆子档案',
+                          '/customers': '客户档案',
+                          '/admin': '库存管理',
+                        }[path]
+                      }
+                    </strong>
+                    <span>进入业务</span>
+                  </div>
+                  <ArrowRight />
+                </Link>
+              ))}
+          </div>
+          {!Object.values(routePermission).some(can) && (
+            <p className="hint">尚未分配业务权限，请联系管理员。</p>
+          )}
+        </section>
+      </div>
+    );
   const count = catalog?.stats;
   return (
     <div className="dashboard-grid">
@@ -737,6 +797,7 @@ function Dashboard({ catalog }: { catalog: Catalog | null }) {
 }
 
 export default function Roastery({ view = 'orders' }: { view?: View }) {
+  const { can } = useAuth();
   const [catalog, setCatalog] = useState<Catalog | null>(null),
     [catalogError, setCatalogError] = useState(''),
     [revision, setRevision] = useState(0);
@@ -848,6 +909,22 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
     return () => clearTimeout(timer);
   }, [toast]);
   function open(m: Modal) {
+    const kind = m.type;
+    const permission = mutationPermission(kind);
+    if (
+      permission &&
+      !can(permission) &&
+      kind !== 'profile' &&
+      !(
+        (kind === 'bean' || kind === 'customer') &&
+        'record' in m &&
+        m.record &&
+        can(kind === 'bean' ? 'beans.delete' : 'customers.delete')
+      )
+    ) {
+      setToast('此操作未授权，请联系管理员。');
+      return;
+    }
     setFormError('');
     setModal(m);
   }
@@ -926,26 +1003,30 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
           ).map((section) => (
             <div className="nav-section" key={section.label}>
               <p className="nav-label">{section.label}</p>
-              {section.items.map((n) => (
-                <Link
-                  key={n.view}
-                  className={'nav-item ' + (view === n.view ? 'active' : '')}
-                  href={n.url}
-                  title={views[n.view].title}
-                  aria-label={views[n.view].title}
-                  aria-current={view === n.view ? 'page' : undefined}
-                >
-                  <n.icon />
-                  {views[n.view].title}
-                  {n.view === 'roasting' &&
-                    count &&
-                    count.waiting + count.roasting > 0 && (
-                      <span className="nav-count">
-                        {count.waiting + count.roasting}
-                      </span>
-                    )}
-                </Link>
-              ))}
+              {section.items
+                .filter(
+                  (n) => !routePermission[n.url] || can(routePermission[n.url]),
+                )
+                .map((n) => (
+                  <Link
+                    key={n.view}
+                    className={'nav-item ' + (view === n.view ? 'active' : '')}
+                    href={n.url}
+                    title={views[n.view].title}
+                    aria-label={views[n.view].title}
+                    aria-current={view === n.view ? 'page' : undefined}
+                  >
+                    <n.icon />
+                    {views[n.view].title}
+                    {n.view === 'roasting' &&
+                      count &&
+                      count.waiting + count.roasting > 0 && (
+                        <span className="nav-count">
+                          {count.waiting + count.roasting}
+                        </span>
+                      )}
+                  </Link>
+                ))}
             </div>
           ))}
         </nav>
@@ -955,6 +1036,7 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
         </div>
       </aside>
       <main className="main">
+        <SessionBar />
         <div className="topline">
           <span>工作台 / {details.title}</span>
           <span>订单 · 烘焙 · 库存 · 发货</span>
@@ -973,6 +1055,13 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
             view === 'beans' ||
             view === 'customers') && (
             <Button
+              permission={
+                view === 'beans'
+                  ? 'beans.manage'
+                  : view === 'customers'
+                    ? 'customers.manage'
+                    : 'orders.manage'
+              }
               className="primary-action"
               onClick={() =>
                 view === 'beans'
@@ -1311,7 +1400,11 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                       : '先记下客户和豆子，再选好烘焙方案。'}
                 </p>
                 {!q && filter === 'all' && view === 'orders' && (
-                  <Button className="primary-action" onClick={newOrder}>
+                  <Button
+                    permission="orders.manage"
+                    className="primary-action"
+                    onClick={newOrder}
+                  >
                     创建第一张订单
                     <ArrowUpRight />
                   </Button>
@@ -1423,6 +1516,7 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                                 管理方案
                               </Button>
                               <Button
+                                permission={['beans.manage', 'beans.delete']}
                                 variant="ghost"
                                 size="sm"
                                 onClick={() =>
@@ -1476,6 +1570,7 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                           <div className="bean-picture-label">上传豆子海报</div>
                           {!!b.is_demo && <DemoBadge />}
                           <Button
+                            permission={['beans.manage', 'beans.delete']}
                             variant="ghost"
                             size="icon-sm"
                             aria-label={'编辑' + b.name}
@@ -1555,6 +1650,7 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                       <h3>{q ? '没有找到这款豆子' : '先认识你的第一款豆子'}</h3>
                       <p>记下豆子的名字和特点，再给它添加烘焙方案。</p>
                       <Button
+                        permission="beans.manage"
                         className="primary-action"
                         onClick={() => open({ type: 'bean' })}
                       >
@@ -1682,6 +1778,10 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                               : '还没有下单记录'}
                           </span>
                           <Button
+                            permission={[
+                              'customers.manage',
+                              'customers.delete',
+                            ]}
                             variant="ghost"
                             size="sm"
                             onClick={() =>
@@ -1706,6 +1806,7 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                     </h3>
                     <p>个人、咖啡馆和公司都可以记录在这里。</p>
                     <Button
+                      permission="customers.manage"
                       className="primary-action"
                       onClick={() => open({ type: 'customer' })}
                     >
@@ -1847,6 +1948,7 @@ export default function Roastery({ view = 'orders' }: { view?: View }) {
                   </p>
                 )}
                 <Button
+                  permission="beans.manage"
                   className="primary-action"
                   onClick={() => open({ type: 'profile', bean: modal.bean })}
                 >
@@ -1958,7 +2060,11 @@ function SkuForm({
         </p>
         <div className="form-actions field-wide">
           <span>库存以生豆重量记录</span>
-          <Button type="submit" className="primary-action">
+          <Button
+            permission="inventory.manage"
+            type="submit"
+            className="primary-action"
+          >
             {busy ? '正在保存…' : '保存批次'}
             <Check size={16} />
           </Button>
@@ -2121,6 +2227,11 @@ function CatalogForm({
                 type="button"
                 variant="destructive"
                 className="archive-delete"
+                permission={
+                  modal.type === 'customer'
+                    ? 'customers.delete'
+                    : 'beans.delete'
+                }
                 disabled={busy}
                 onClick={() => void remove()}
               >
@@ -2128,7 +2239,13 @@ function CatalogForm({
                 删除档案
               </Button>
             )}
-            <Button type="submit" className="primary-action">
+            <Button
+              permission={
+                modal.type === 'customer' ? 'customers.manage' : 'beans.manage'
+              }
+              type="submit"
+              className="primary-action"
+            >
               {busy ? '正在保存…' : '保存档案'}
               <Check size={16} />
             </Button>
@@ -2429,7 +2546,11 @@ function ProfileForm({
           <Button variant="ghost" type="button" onClick={onBack}>
             返回方案列表
           </Button>
-          <Button className="primary-action" type="submit">
+          <Button
+            permission="beans.manage"
+            className="primary-action"
+            type="submit"
+          >
             {busy ? '正在保存…' : '保存烘焙方案'}
             <Check size={16} />
           </Button>
@@ -2481,11 +2602,19 @@ function OrderForm({
       <div className="setup-notice">
         <p>先记下客户和豆子，新订单就能直接选用。</p>
         <div>
-          <Button variant="outline" onClick={() => open({ type: 'customer' })}>
+          <Button
+            permission="customers.manage"
+            variant="outline"
+            onClick={() => open({ type: 'customer' })}
+          >
             <Users size={16} />
             {catalog.customers.length ? '继续添加客户' : '先添加一位客户'}
           </Button>
-          <Button variant="outline" onClick={() => open({ type: 'bean' })}>
+          <Button
+            permission="beans.manage"
+            variant="outline"
+            onClick={() => open({ type: 'bean' })}
+          >
             <BeanIcon size={16} />
             {catalog.beans.length ? '继续添加豆子' : '先添加一款豆子'}
           </Button>
@@ -2711,6 +2840,7 @@ function OrderDetail({ id, revision }: { id: string; revision: number }) {
               这张订单的烘焙已经完成；发货请到“发货工作台”登记。
             </p>
             <Button
+              permission="roasting.manage"
               variant="outline"
               onClick={() =>
                 window.location.assign(
@@ -2730,6 +2860,7 @@ function OrderDetail({ id, revision }: { id: string; revision: number }) {
                 : '这锅正在进行，请回到烘焙记录台继续记录曲线。'}
             </p>
             <Button
+              permission="roasting.manage"
               className="primary-action"
               onClick={() =>
                 window.location.assign(

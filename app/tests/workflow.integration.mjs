@@ -1,10 +1,16 @@
 import assert from 'node:assert/strict';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile, readFile } from 'node:fs/promises';
 
 const origin = process.env.TEST_ORIGIN || 'http://localhost:3001';
 if (!['localhost', '127.0.0.1'].includes(new URL(origin).hostname))
   throw new Error('Integration tests may only write to a local test database');
 const endpoint = origin + '/api/roastery';
+const authFixture = JSON.parse(
+  await readFile('work/auth-test-records.json', 'utf8'),
+);
+if (authFixture.origin !== origin)
+  throw new Error('Use the same local origin as auth.integration.mjs');
+const cookie = authFixture.cookie;
 const records = {
   customer: null,
   bean: null,
@@ -22,7 +28,11 @@ async function call(method, payload, expected = 200) {
   const r = await fetch(endpoint, {
     method:
       method === 'POST' ? 'POST' : method === 'PATCH' ? 'PATCH' : 'DELETE',
-    headers: { 'Content-Type': 'application/json', Origin: origin },
+    headers: {
+      'Content-Type': 'application/json',
+      Origin: origin,
+      Cookie: cookie,
+    },
     body: JSON.stringify(payload),
   });
   const data = await r.json();
@@ -30,7 +40,9 @@ async function call(method, payload, expected = 200) {
   return data;
 }
 async function get(query) {
-  const r = await fetch(endpoint + '?' + new URLSearchParams(query));
+  const r = await fetch(endpoint + '?' + new URLSearchParams(query), {
+    headers: { Cookie: cookie },
+  });
   assert.equal(r.status, 200);
   return r.json();
 }
@@ -311,6 +323,7 @@ try {
     headers: {
       'Content-Type': 'application/json',
       Origin: 'https://unrelated.example',
+      Cookie: cookie,
     },
     body: JSON.stringify({ kind: 'customer', name: 'must not save' }),
   });

@@ -28,7 +28,8 @@ import {
   Users,
   Warehouse,
 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { PermissionButton as Button } from '@/components/permission-button';
+import { useAuth } from '@/components/auth-provider';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { NativeSelect } from '@/components/ui/native-select';
@@ -116,6 +117,8 @@ async function callApi<T = Record<string, unknown>>(
     ...init,
   });
   const data = (await response.json()) as Record<string, unknown>;
+  if (response.status === 401)
+    window.dispatchEvent(new Event('roastory-auth-change'));
   if (!response.ok)
     throw new Error(
       typeof data.error === 'string' ? data.error : '操作没有完成，请重试。',
@@ -152,6 +155,8 @@ export default function OperationsPanel({
   revision,
   onChanged,
 }: Props) {
+  const { can } = useAuth();
+  const canRoast = can('roasting.manage');
   const [data, setData] = useState<OperationsData | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -227,22 +232,33 @@ export default function OperationsPanel({
     }
   }
 
-  const startBatch = useCallback((orders: RoastOrder[]) => {
-    const key = orders
-      .map((order) => order.id)
-      .sort()
-      .join(',');
-    revisions.current[key] = orders[0].roast_revision || 0;
-    setRoastBatch({
-      key,
-      orders,
-      startedAt: null,
-      machine: 'Sandouke 600',
-    });
-  }, []);
+  const startBatch = useCallback(
+    (orders: RoastOrder[]) => {
+      if (!canRoast) {
+        setError('没有烘焙操作权限，请联系管理员。');
+        return;
+      }
+      const key = orders
+        .map((order) => order.id)
+        .sort()
+        .join(',');
+      revisions.current[key] = orders[0].roast_revision || 0;
+      setRoastBatch({
+        key,
+        orders,
+        startedAt: null,
+        machine: 'Sandouke 600',
+      });
+    },
+    [canRoast],
+  );
 
   const resumeBatch = useCallback(
     async (orders: RoastOrder[]) => {
+      if (!canRoast) {
+        setError('没有烘焙操作权限，请联系管理员。');
+        return;
+      }
       try {
         const first = (
           await callApi<{ order: RoastOrder }>(
@@ -321,11 +337,11 @@ export default function OperationsPanel({
         session,
       });
     },
-    [roastProgress, roastSessions],
+    [roastProgress, roastSessions, canRoast],
   );
 
   useEffect(() => {
-    if (view !== 'roasting' || !data || roastBatch) return;
+    if (view !== 'roasting' || !data || roastBatch || !canRoast) return;
     const orderId = new URLSearchParams(window.location.search).get('order');
     if (!orderId) return;
 
@@ -410,7 +426,7 @@ export default function OperationsPanel({
     return () => {
       cancelled = true;
     };
-  }, [data, roastBatch, resumeBatch, startBatch, view]);
+  }, [data, roastBatch, resumeBatch, startBatch, view, canRoast]);
 
   const persistSession = useCallback(
     (
@@ -894,6 +910,7 @@ function RoastingBoard({
                   </div>
                   {first.status === 'waiting' ? (
                     <Button
+                      permission="roasting.manage"
                       className="primary-action"
                       disabled={busy || !!currentRoasting}
                       onClick={() => startBatch(orders)}
@@ -902,14 +919,15 @@ function RoastingBoard({
                       {currentRoasting ? '等待当前烘焙' : '开始这一批'}
                     </Button>
                   ) : (
-                    <button
+                    <Button
+                      permission="roasting.manage"
                       className="roasting-state"
                       onClick={() => resumeBatch(orders)}
                     >
                       <Flame />
                       {progress?.machine || 'Sandouke 600'} · 烘焙中
                       <ArrowRight />
-                    </button>
+                    </Button>
                   )}
                 </article>
               );
@@ -941,6 +959,7 @@ function RoastingBoard({
                   <strong>{kg(order.quantity_grams)}</strong>
                   {order.status === 'waiting' ? (
                     <Button
+                      permission="roasting.manage"
                       variant="outline"
                       disabled={busy || !!currentRoasting}
                       onClick={() => startBatch([order])}
@@ -949,7 +968,8 @@ function RoastingBoard({
                       <ArrowRight />
                     </Button>
                   ) : (
-                    <button
+                    <Button
+                      permission="roasting.manage"
                       className="roasting-state"
                       onClick={() => resumeBatch([order])}
                     >
@@ -957,7 +977,7 @@ function RoastingBoard({
                       {roastProgress[order.id]?.machine || 'Sandouke 600'} ·
                       烘焙中
                       <ArrowRight />
-                    </button>
+                    </Button>
                   )}
                 </article>
               ))}
@@ -1979,7 +1999,11 @@ function FulfillmentBoard({
               <h2>等待发货</h2>
               <p>烘焙完成的订单会自动来到这里。</p>
             </div>
-            <Button variant="outline" onClick={() => openShipment('sample')}>
+            <Button
+              permission="shipping.manage"
+              variant="outline"
+              onClick={() => openShipment('sample')}
+            >
               <Plus />
               登记样品发货
             </Button>
@@ -2011,6 +2035,7 @@ function FulfillmentBoard({
                   <strong>{order.due_date || '未指定'}</strong>
                 </div>
                 <Button
+                  permission="shipping.manage"
                   className="primary-action"
                   onClick={() => openShipment(order)}
                 >
@@ -2059,6 +2084,7 @@ function FulfillmentBoard({
                 </div>
                 {shipment.status === 'shipped' ? (
                   <Button
+                    permission="shipping.manage"
                     variant="outline"
                     disabled={busy}
                     onClick={() => delivered(shipment.id)}
@@ -2157,6 +2183,7 @@ function AdminBoard({
                     {low ? '库存偏低' : '库存正常'}
                   </span>
                   <Button
+                    permission="inventory.manage"
                     variant="ghost"
                     size="sm"
                     onClick={() => openInventory(sku)}

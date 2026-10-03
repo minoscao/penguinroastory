@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import './responsive.css';
+import './accounts.css';
+import AuthProvider from '@/components/auth-provider';
 export const metadata: Metadata = {
   metadataBase: new URL('https://roastory.mia-dynamic.com'),
   title: '企鹅烘焙 · 烘焙工作台',
@@ -30,7 +32,9 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="zh-CN">
-      <body>{children}</body>
+      <body>
+        <AuthProvider>{children}</AuthProvider>
+      </body>
     </html>
   );
 }
